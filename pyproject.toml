@@ -1,0 +1,24 @@
+[tool.poetry]
+name = "chainette"
+version = "0.1.0"
+description = "Typed, lightweight LLM chaining with Pydantic IO and vLLM back‑ends"
+authors = ["Your Name you@example.com"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+vllm = "^0.8.5.post1"
+requests = "^2.32"
+pydantic = "^2.6"
+datasets = "^2.19"
+rich = "^13.7"
+typer = {version = "^0.12", extras = ["all"]}
+pyyaml = "^6.0"
+
+[tool.poetry.scripts]
+chainette = "chainette.cli:app"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

@@ -1,0 +1,81 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# pytest/coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+coverage.xml
+*.cover
+.hypothesis/
+
+# Distribution / packaging
+*.manifest
+*.spec
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Run outputs and experiment results
+output/
+runs/
+outputs/
+.cache/
+examples/*/outputs/
+
+# vLLM server caches
+~/.cache/chainette/
+
+# Local configuration and secrets files
+.env
+config.local.yml
+*.local.yaml
+*.local.yml
+local_config.py
+secrets.json
+*.pem
+*.key
+
+# Log files
+*.log
+logs/
