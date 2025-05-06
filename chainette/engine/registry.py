@@ -52,6 +52,9 @@ class EngineConfig(BaseModel):
         default_factory=lambda: [0],
         description="CUDA device indices for this engine (tensor parallel if >1)",
     )
+    max_model_len: Optional[int] = Field(
+        None, description="Maximum sequence length the model can handle"
+    )
 
     # Reasoning & other toggles ----------------------------------------------
     enable_reasoning: bool = False

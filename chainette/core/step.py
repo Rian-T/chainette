@@ -1,34 +1,31 @@
-"""
-Single‑step execution wrapper.
-
-* Mandatory: every Step has an *output_model* (Pydantic).
-* We ALWAYS ask vLLM for guided JSON decoding that matches that schema.
-  ‑ User SamplingParams are respected (temperature, top_p, …).
-  ‑ If the caller already supplied guided_decoding we merge, ours wins.
-"""
-
 from __future__ import annotations
+
+"""chainette.core.step – single LLM invocation node.
+
+This final version ensures **mandatory guided JSON decoding** derived from
+``output_model.model_json_schema()`` and gracefully handles either the
+lightweight wrapper *or* vLLM's native :class:`SamplingParams` object.
+"""
 
 import hashlib
 import json
-from typing import Any, Type
+from typing import Any, List, Sequence, Type
 
 import requests
 from pydantic import BaseModel
+from vllm import SamplingParams  # type: ignore
+from vllm.sampling_params import GuidedDecodingParams  # type: ignore
 
-from chainette.engine.registry import get_engine_config # Added import
-from chainette.engine.runtime import spawn_engine, LiveEngine
+from chainette.engine.registry import get_engine_config
+from chainette.engine.runtime import spawn_engine
 from chainette.utils.templates import render
 
-# --- thin re‑export ----------------------------------------------------------
-
-from vllm import SamplingParams  # noqa: F401
-from vllm import GuidedDecodingParams  # noqa: F401
+from rich.console import Console
 
 __all__ = ["Step"]
-
-
 class Step:  # noqa: D101
+    """Declarative definition and execution of a single model call."""
+
     def __init__(
         self,
         *,
@@ -37,11 +34,11 @@ class Step:  # noqa: D101
         input_model: Type[BaseModel],
         output_model: Type[BaseModel],
         engine_name: str,
-        sampling: "SamplingParams",
+        sampling: SamplingParams | Any,
         system_prompt: str,
         user_prompt: str,
         emoji: str = "🔗",
-    ):
+    ) -> None:  # noqa: D401, ANN001
         self.id = id
         self.name = name
         self.emoji = emoji
@@ -52,94 +49,100 @@ class Step:  # noqa: D101
         self.system_prompt = system_prompt
         self.user_prompt = user_prompt
 
-        # Pre‑compute JSON schema + GuidedDecodingParams once
-        schema = json.dumps(self.output_model.model_json_schema())
-        self._guided = GuidedDecodingParams(json=schema)
+        # ------------------------------------------------------------------
+        # Pre‑compute guided‑decoding schema and deterministic signature
+        # ------------------------------------------------------------------
 
-        # Hash helps Step equality / caching
+        schema_json = json.dumps(self.output_model.model_json_schema())
+        self._guided = GuidedDecodingParams(json=schema_json)
+
+        sampling_blob = (
+            sampling.as_dict()  # our thin wrapper
+            if hasattr(sampling, "as_dict")
+            else getattr(sampling, "model_dump", lambda: vars(sampling))()
+        )
         self._sig = hashlib.md5(
-            f"{id}{schema}{json.dumps(sampling.model_dump())}".encode(),
+            f"{id}{schema_json}{json.dumps(sampling_blob, default=str)}".encode(),
             usedforsecurity=False,
         ).hexdigest()[:8]
 
-    # --------------------------------------------------------------------- #
+    # ------------------------------------------------------------------
+    # Internals
+    # ------------------------------------------------------------------
 
-    def _sampling_with_guidance(self) -> "SamplingParams":
-        """Return a copy of user sampling with mandatory guided JSON."""
-        kw = self._base_sampling.model_dump()
-        # User might already set 'guided_decoding'; we override
-        kw["guided_decoding"] = self._guided
-        return SamplingParams(**kw)
+    def _sampling_with_guidance(self) -> SamplingParams:  # noqa: D401
+        if hasattr(self._base_sampling, "model_dump"):
+            d = self._base_sampling.model_dump()
+        elif hasattr(self._base_sampling, "as_dict"):
+            d = self._base_sampling.as_dict()
+        else:
+            d = dict(vars(self._base_sampling))
+        d["guided_decoding"] = self._guided
+        return SamplingParams(**d)
 
-    # --------------------------------------------------------------------- #
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
-    def run(
-        self, inputs: list[BaseModel], run_id: str, step_index: int
-    ) -> list[BaseModel]:
-        """Execute a batch of inputs and return parsed outputs."""
-        engine_cfg = get_engine_config(self.engine_name) # Get config first
-        engine: LiveEngine = spawn_engine(engine_cfg) # Pass config to spawn
+    def run(self, inputs: Sequence[BaseModel], *, run_id: str, step_index: int) -> List[BaseModel]:  # noqa: D401,WPS231
+        console = Console()
+
+        if not inputs:
+            return []
+
+        cfg = get_engine_config(self.engine_name)
+        engine = spawn_engine(cfg)
         sp = self._sampling_with_guidance()
 
-        results: list[BaseModel] = []
-        for idx, inp in enumerate(inputs):
-            # Prepare payload for each input
-            prompts = [
-                {
-                    "role": "system",
-                    "content": self.system_prompt,
-                },
-                {
-                    "role": "user",
-                    "content": render(self.user_prompt, inp.model_dump()), # Pass dict to render
-                },
-            ]
+        url = f"http://127.0.0.1:{engine.port}/v1/chat/completions"
+        headers = {"Content-Type": "application/json"}
 
-            payload = {
-                "model": engine.config.model, # Use config from LiveEngine
-                "messages": prompts,
-                **sp.model_dump(mode="json", exclude_none=True),
+        outputs: List[BaseModel] = []
+
+        for row_id, inp in enumerate(inputs):
+            ctx = inp.model_dump()
+            sys_msg = render(self.system_prompt, ctx) if self.system_prompt else ""
+            usr_msg = render(self.user_prompt, ctx)
+
+            messages = []
+            if sys_msg:
+                messages.append({"role": "system", "content": sys_msg})
+            messages.append({"role": "user", "content": usr_msg})
+
+            if hasattr(sp, "model_dump"):
+                sp_dict = sp.model_dump(exclude_none=True)
+            elif hasattr(sp, "as_dict"):
+                sp_dict = sp.as_dict()
+            else:
+                sp_dict = {k: v for k, v in vars(sp).items() if v is not None}
+
+            body = {
+                "model": cfg.model,
+                "messages": messages,
+                **sp_dict,
                 "stream": False,
+                "guided_json": self._guided.json,
             }
-            # Construct the correct URL using the engine's port
-            api_url = f"http://127.0.0.1:{engine.port}/v1/chat/completions"
-            resp = requests.post(api_url, json=payload, timeout=60)
-            resp.raise_for_status()
-            text = resp.json()["choices"][0]["message"]["content"]
+
+            try:
+                resp = requests.post(url, json=body, headers=headers, timeout=90)
+                resp.raise_for_status()
+                text = resp.json()["choices"][0]["message"]["content"]
+            except requests.RequestException as e:
+                raise RuntimeError(f"API request failed for step '{self.id}': {e}") from e
 
             try:
                 parsed = self.output_model.model_validate_json(text)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 raise RuntimeError(
-                    f"Step '{self.id}' expected JSON compliant with "
-                    f"{self.output_model.__name__}, got:\n{text}"
+                    f"Guided decoding failed for step '{self.id}'. Raw reply: {text[:200]}…"
                 ) from exc
 
-            # add bookkeeping fields expected by writer
-            parsed_dict = parsed.model_dump()
-            parsed_dict.update(
-                step_name=self.name,
-                step_emoji=self.emoji,
-                id=idx, # Use loop index for id
-                run_id=run_id, # Add run_id
-                step_index=step_index # Add step_index
-            )
-            # Re-validate with the added fields if they are part of the model
-            # If not, consider creating a wrapper model or handling differently
-            # For now, assuming output_model can handle these extra fields or they are ignored
-            try:
-                final_model = self.output_model.model_validate(parsed_dict)
-            except Exception as e:
-                 # If validation fails, maybe just return the dict or a simpler model
-                 # For now, let's assume it works or handle the error
-                 print(f"Warning: Could not re-validate model with bookkeeping fields: {e}")
-                 final_model = parsed # Fallback to original parsed model
+            outputs.append(parsed)
 
-            results.append(final_model)
+        return outputs
 
-        return results
+    # convenience -----------------------------------------------------------
 
-    # Convenience for writer
     def signature(self) -> str:  # noqa: D401
-        """A short hash that changes when sampling or schema changes."""
         return self._sig

@@ -9,8 +9,10 @@ metadata.  Kept separate so we don’t repeat the regex in multiple files.
 """
 
 import re
+import uuid
+from datetime import datetime
 
-__all__ = ["snake_case"]
+__all__ = ["snake_case", "new_run_id"]
 
 _PATTERN = re.compile(r"[^a-zA-Z0-9]+")
 
@@ -27,3 +29,14 @@ def snake_case(text: str) -> str:  # noqa: D401
     s = _PATTERN.sub("_", text)
     s = re.sub(r"_+", "_", s)
     return s.strip("_").lower()
+
+
+def new_run_id() -> str:
+    """Generate a unique run ID combining timestamp and UUID.
+    
+    Returns:
+        A string in format 'YYYYMMDD-HHMMSS-[first 8 chars of UUID]'
+    """
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    unique_id = str(uuid.uuid4())[:8]  # Just use first 8 chars for brevity
+    return f"{timestamp}-{unique_id}"

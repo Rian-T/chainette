@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from typing import Optional, List
 
 from chainette import (
     Step,
@@ -13,6 +14,8 @@ class RawDesc(BaseModel):
     """Incoming noisy e‑commerce text."""
 
     text: str = Field(..., description="messy product description")
+    source: Optional[str] = Field(None, description="source of the product description")
+    confidence: Optional[float] = Field(None, description="confidence in raw data quality")
 
 
 class Attr(BaseModel):
@@ -21,6 +24,9 @@ class Attr(BaseModel):
     brand: str
     model: str
     price_eur: float
+    category: Optional[str] = None
+    features: Optional[List[str]] = None
+    availability: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -29,10 +35,11 @@ class Attr(BaseModel):
 
 register_engine(
     name="llama3",
-    model="NousResearch/Meta-Llama-3-8B-Instruct",
-    dtype="bfloat16",
-    gpu_memory_utilization=0.6,
+    model="meta-llama/Llama-3.2-3B-Instruct",
+    dtype="float16",
+    gpu_memory_utilization=0.95,
     lazy=True,
+    max_model_len=2048
 )
 
 # ---------------------------------------------------------------------------
@@ -47,9 +54,11 @@ extract = Step(
     engine_name="llama3",
     sampling=SamplingParams(temperature=0),
     system_prompt=(
-        "Identify and return the product's brand, model name and price in euros."
+        "You are a specialized e-commerce data extraction system. Parse the provided product description "
+        "to identify key product attributes. Analyze carefully for brand name, exact model designation, "
+        "and price in euros. When possible, also extract product category, key features, and availability."
     ),
-    user_prompt="{{text}}",
+    user_prompt="Product description: {{text}}\nSource: {{source}}\n\nExtract all structured product information.",
 )
 
 fr = Step(
@@ -60,9 +69,20 @@ fr = Step(
     engine_name="llama3",
     sampling=SamplingParams(temperature=0.3),
     system_prompt=(
-        "Translate brand and model to French if appropriate and keep the price value unchanged."
+        "You are a professional French e-commerce content localizer. Translate the product information to "
+        "French while maintaining the precision of technical specifications. Ensure brand names remain "
+        "recognizable while adapting model names only when there are standard French equivalents. "
+        "Keep the price value unchanged."
     ),
-    user_prompt="{{brand}} {{model}} coûte {{price_eur}} €",
+    user_prompt=(
+        "Produit à localiser en français:\n"
+        "- Marque: {{brand}}\n"
+        "- Modèle: {{model}}\n"
+        "- Prix: {{price_eur}} €\n"
+        "Catégorie: {{category}}\n"
+        "Caractéristiques: {{features}}\n"
+        "Disponibilité: {{availability}}"
+    ),
 )
 
 es = Step(
@@ -73,9 +93,20 @@ es = Step(
     engine_name="llama3",
     sampling=SamplingParams(temperature=0.3),
     system_prompt=(
-        "Translate brand and model to Spanish if appropriate and keep the price value unchanged."
+        "You are a professional Spanish e-commerce content localizer. Translate the product information to "
+        "Spanish while maintaining the precision of technical specifications. Ensure brand names remain "
+        "recognizable while adapting model names only when there are standard Spanish equivalents. "
+        "Keep the price value unchanged."
     ),
-    user_prompt="El {{brand}} {{model}} cuesta {{price_eur}} €",
+    user_prompt=(
+        "Producto para localizar en español:\n"
+        "- Marca: {{brand}}\n"
+        "- Modelo: {{model}}\n"
+        "- Precio: {{price_eur}} €\n"
+        "Categoría: {{category}}\n"
+        "Características: {{features}}\n"
+        "Disponibilidad: {{availability}}"
+    ),
 )
 
 # ---------------------------------------------------------------------------
@@ -96,4 +127,15 @@ chain = Chain(
 
 
 if __name__ == "__main__":
-    chain.run([RawDesc(text="🔥 Apple iPhone 15 Pro, 128 Go, 999 €")])
+    chain.run([
+        RawDesc(
+            text="🔥 Apple iPhone 15 Pro, 128 Go, Titanium Finish, 48MP Camera, 999 €, In Stock",
+            source="electronics-direct.com",
+            confidence=0.95
+        ),
+        RawDesc(
+            text="Samsung Galaxy S23 Ultra - Écran Dynamic AMOLED 6.8\" - 12GB RAM - 512GB - Prix: 1299€",
+            source="mobile-deals.fr",
+            confidence=0.89
+        )
+    ])

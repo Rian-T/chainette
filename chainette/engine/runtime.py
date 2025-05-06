@@ -22,14 +22,14 @@ Backend assumptions:
 No other sophisticated orchestration (e.g. load balancing) is attempted.
 """
 
-from __future__ import annotations
-
 import json
+import logging
 import os
 import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,6 +56,41 @@ __all__ = [
 
 _CACHE_DIR = Path.home() / ".cache" / "chainette" / "engines"
 _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+_LOGS_DIR = Path.home() / ".cache" / "chainette" / "logs"
+_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Set up basic logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] [%(name)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("chainette.engine")
+
+
+def _get_engine_logger(name: str) -> logging.Logger:
+    """Create a logger for the specified engine with file handler."""
+    log_file = _LOGS_DIR / f"{name}.log"
+    engine_logger = logging.getLogger(f"chainette.engine.{name}")
+    engine_logger.setLevel(logging.INFO)  # Ensure logger level is set
+
+    # Prevent propagation to root logger (which might log to console)
+    engine_logger.propagate = False
+
+    # Remove existing handlers to avoid duplicates
+    for handler in engine_logger.handlers[:]:
+        engine_logger.removeHandler(handler)
+        handler.close()  # Close handler before removing
+
+    # Add file handler
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s",
+        "%Y-%m-%d %H:%M:%S"
+    ))
+    engine_logger.addHandler(file_handler)
+    return engine_logger
 
 
 def _cache_path(name: str) -> Path:  # noqa: D401
@@ -154,7 +189,7 @@ class LiveEngine:  # noqa: D401
 _LIVE: Dict[str, LiveEngine] = {}
 
 
-def spawn_engine(cfg: EngineConfig, *, force: bool = False, wait: float = 60.0) -> LiveEngine:  # noqa: WPS231
+def spawn_engine(cfg: EngineConfig, *, force: bool = False, wait: float = 360.0) -> LiveEngine:  # noqa: WPS231
     """Ensure a vLLM server matching *cfg* is running.
 
     If a live server with the same *name* **and** matching `cfg_hash` exists,
@@ -171,6 +206,8 @@ def spawn_engine(cfg: EngineConfig, *, force: bool = False, wait: float = 60.0) 
         Seconds to wait for the health‑check to pass.
     """
 
+    logger.info(f"Ensuring engine '{cfg.name}' is running (force={force})")
+
     # 1) attempt cache reuse --------------------------------------------------
     cache_file = _cache_path(cfg.name)
     if cache_file.exists() and not force:
@@ -184,31 +221,52 @@ def spawn_engine(cfg: EngineConfig, *, force: bool = False, wait: float = 60.0) 
     # 2) if here → need fresh process ----------------------------------------
     if cache_file.exists():
         try:
-            _terminate_pid(int(json.loads(cache_file.read_text())["pid"]))
-        except Exception:  # noqa: WPS430 – best effort
-            pass
+            pid_to_kill = int(json.loads(cache_file.read_text())["pid"])
+            logger.info(f"Terminating existing process {pid_to_kill} for engine '{cfg.name}'")
+            _terminate_pid(pid_to_kill)
+        except Exception as e:
+            logger.warning(f"Failed to terminate existing process for '{cfg.name}': {e}")
         cache_file.unlink(missing_ok=True)
 
     port = _find_free_port()
     cmd = _build_vllm_command(cfg, port)
 
-    process = subprocess.Popen(  # noqa: WPS316
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    logger.info(f"Starting vLLM server for '{cfg.name}' on port {port}. Logs: {_LOGS_DIR}/{cfg.name}.log")
+
+    # Get logger and log file path
+    engine_logger = _get_engine_logger(cfg.name)
+    log_file_path = _LOGS_DIR / f"{cfg.name}.log"
+
+    # Start process with stdout/stderr redirected to the log file
+    try:
+        with open(log_file_path, 'a') as log_f:
+            process = subprocess.Popen(
+                cmd,
+                stdout=log_f,
+                stderr=log_f,
+                text=True,
+            )
+    except Exception as e:
+        logger.error(f"Failed to start vLLM process for '{cfg.name}': {e}")
+        raise
+
+    # Log startup info to the main log as well (briefly)
+    logger.info(f"vLLM server process for '{cfg.name}' started with PID {process.pid}")
 
     # 3) poll for readiness ---------------------------------------------------
+    logger.info(f"Waiting for vLLM server '{cfg.name}' on port {port} to become ready (timeout: {wait}s)...")
     deadline = time.time() + wait
     while time.time() < deadline:
         if _health_check(port):
+            logger.info(f"vLLM server '{cfg.name}' is ready on port {port}")
             break
         if process.poll() is not None:  # crashed
-            raise RuntimeError(f"vLLM server for '{cfg.name}' exited early. Check stderr:\n{process.stderr.read()}")
+            logger.error(f"vLLM server for '{cfg.name}' exited early with code {process.returncode}. Check logs: {log_file_path}")
+            raise RuntimeError(f"vLLM server for '{cfg.name}' exited early. Check logs in {log_file_path}")
         time.sleep(0.5)
     else:
         process.kill()
+        logger.error(f"Timed out waiting for vLLM server '{cfg.name}' to become ready. Check logs: {log_file_path}")
         raise TimeoutError(f"Timed out waiting for vLLM server '{cfg.name}' to become ready")
 
     live = LiveEngine(cfg.name, cfg, process.pid, port)
@@ -268,13 +326,11 @@ def _terminate_pid(pid: int, *, timeout: float = 5.0) -> None:  # noqa: D401
 
 
 def _build_vllm_command(cfg: EngineConfig, port: int) -> List[str]:  # noqa: D401
-    """Translate *cfg* into a `python -m vllm.entrypoints.api_server` command."""
+    """Translate *cfg* into a `vllm serve` command."""
 
     cmd: List[str] = [
-        sys.executable,
-        "-m",
-        "vllm.entrypoints.api_server",
-        "--model",
+        "vllm",
+        "serve",
         cfg.model,
         "--port",
         str(port),
@@ -282,8 +338,8 @@ def _build_vllm_command(cfg: EngineConfig, port: int) -> List[str]:  # noqa: D40
         cfg.dtype,
         "--gpu-memory-utilization",
         str(cfg.gpu_memory_utilization),
-        "--gpu-ids",
-        ",".join(str(i) for i in cfg.devices),
+        "--max-model-len",
+        str(cfg.max_model_len) if cfg.max_model_len else "2048",
     ]
 
     if cfg.enable_reasoning:

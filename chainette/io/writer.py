@@ -6,14 +6,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, List, Dict # Added Dict
+from typing import Any, List, Dict
 
 from datasets import Dataset, DatasetDict
-from pydantic import BaseModel # Added BaseModel import
+from pydantic import BaseModel
 
 from chainette.utils.ids import snake_case
 
-__all__ = ["RunWriter", "flatten_datasetdict"] # Added flatten_datasetdict to exports
+__all__ = ["RunWriter", "flatten_datasetdict"]
 
 
 class RunWriter:  # noqa: D101
@@ -24,12 +24,12 @@ class RunWriter:  # noqa: D101
         fmt: str,
     ):
         self.root = root
-        self.max_lines = max_lines_per_file # Currently unused, consider implementing chunking
+        self.max_lines = max_lines_per_file
         self.fmt = fmt
         self.root.mkdir(parents=True, exist_ok=True)
         self._splits: dict[str, list[dict[str, Any]]] = {}
-        self._exec_graph: list[dict[str, Any]] = [] # Store execution graph info
-        self._chain_name: str = "" # Store chain name
+        self._exec_graph: list[dict[str, Any]] = []
+        self._chain_name: str = ""
 
     # -------------------------------------------------------------- #
 
@@ -44,7 +44,6 @@ class RunWriter:  # noqa: D101
     def write_step(self, step_id: str, records: list[Any]):
         """Write the output records for a given step ID."""
         split_name = snake_case(step_id)
-        # Ensure records are dicts, converting Pydantic models if necessary
         dict_records = [
             rec.model_dump(mode='json') if isinstance(rec, BaseModel) else rec
             for rec in records
@@ -57,7 +56,7 @@ class RunWriter:  # noqa: D101
         """Convert collected splits into a DatasetDict."""
         dsets = {}
         for split, rows in self._splits.items():
-            if rows: # Only create dataset if there are rows
+            if rows:
                 dsets[split] = Dataset.from_list(rows)
             else:
                 print(f"Warning: No data found for split '{split}'. Skipping dataset creation.")
@@ -79,7 +78,10 @@ class RunWriter:  # noqa: D101
             # Simple writing for now, ignoring max_lines
             file_path = out_dir / f"0.{self.fmt}"
             if self.fmt == "jsonl":
-                ds.to_json(file_path, orient="records", lines=True)
+                # Use custom JSON writing to preserve Unicode characters
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    for item in ds:
+                        f.write(json.dumps(item, ensure_ascii=False) + '\n')
             elif self.fmt == "csv":
                 ds.to_csv(file_path, index=False)
             else:
@@ -93,7 +95,10 @@ class RunWriter:  # noqa: D101
                 flat_out_dir.mkdir(parents=True, exist_ok=True)
                 flat_file_path = flat_out_dir / f"0.{self.fmt}"
                 if self.fmt == "jsonl":
-                    flat_ds.to_json(flat_file_path, orient="records", lines=True)
+                    # Use custom JSON writing to preserve Unicode characters
+                    with open(flat_file_path, 'w', encoding='utf-8') as f:
+                        for item in flat_ds:
+                            f.write(json.dumps(item, ensure_ascii=False) + '\n')
                 elif self.fmt == "csv":
                     flat_ds.to_csv(flat_file_path, index=False)
             except ValueError as e:
@@ -101,16 +106,15 @@ class RunWriter:  # noqa: D101
             except Exception as e:
                 print(f"Warning: An unexpected error occurred during flattening: {e}")
 
-
         # 4) metadata
         meta_path = self.root / "metadata.json"
         meta = {
             "execution_info": {
                 "chain_name": self._chain_name,
-                "run_dir": str(self.root.resolve()), # Use resolved path
+                "run_dir": str(self.root.resolve()),
             },
             "format": self.fmt,
-            "generated_by": "chainette v0.1.0", # Consider making version dynamic
+            "generated_by": "chainette v0.1.0",
             "splits": list(ds_dict.keys()),
         }
         meta_path.write_text(json.dumps(meta, indent=2))

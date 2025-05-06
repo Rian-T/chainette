@@ -7,7 +7,7 @@ license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.10"
+python = ">=3.10,<3.13"
 vllm = "^0.8.5.post1"
 requests = "^2.32"
 pydantic = "^2.6"
