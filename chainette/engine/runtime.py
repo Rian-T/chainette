@@ -189,7 +189,7 @@ class LiveEngine:  # noqa: D401
 _LIVE: Dict[str, LiveEngine] = {}
 
 
-def spawn_engine(cfg: EngineConfig, *, force: bool = False, wait: float = 360.0) -> LiveEngine:  # noqa: WPS231
+def spawn_engine(cfg: EngineConfig, *, force: bool = False, wait: float = 1200.0) -> LiveEngine:  # noqa: WPS231
     """Ensure a vLLM server matching *cfg* is running.
 
     If a live server with the same *name* **and** matching `cfg_hash` exists,

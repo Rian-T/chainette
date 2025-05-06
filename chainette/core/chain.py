@@ -24,6 +24,7 @@ from chainette.core.branch import Branch, Node
 from chainette.io.writer import RunWriter, flatten_datasetdict
 from chainette.utils.ids import snake_case, new_run_id
 from chainette.engine.registry import get_engine_config
+from chainette.engine.runtime import kill_engine  # Added import
 from chainette.utils.constants import SYMBOLS, STYLE
 from chainette.utils.banner import ChainetteBanner  # Import the new banner class
 
@@ -238,6 +239,11 @@ class Chain:
                 return []
                 
             try:
+                # Check and record if engine is lazy
+                engine_cfg = get_engine_config(node.engine_name)
+                if engine_cfg.lazy:
+                    self.activated_lazy_engines.add(node.engine_name)
+
                 outputs = node.run(current_records, run_id=run_id, step_index=i)
                 node_info["signature"] = node.signature()
                 completed_steps[0] += 1
@@ -371,6 +377,10 @@ class Chain:
 
                 try:
                     if isinstance(p_node, Step):
+                        # Check and record if engine is lazy
+                        engine_cfg = get_engine_config(p_node.engine_name)
+                        if engine_cfg.lazy:
+                            self.activated_lazy_engines.add(p_node.engine_name)
                         node_output_list = p_node.run(node_specific_input, run_id=run_id, step_index=step_index)
                         node_info["signature"] = p_node.signature()
                     elif isinstance(p_node, ApplyNode):
@@ -458,6 +468,11 @@ class Chain:
                 node_outputs_for_branch_step = []
                 try:
                     if isinstance(sub_node, Step):
+                        # Check and record if engine is lazy
+                        engine_cfg = get_engine_config(sub_node.engine_name)
+                        if engine_cfg.lazy:
+                            self.activated_lazy_engines.add(sub_node.engine_name)
+
                         node_outputs_for_branch_step = sub_node.run(current_branch_records, run_id=run_id, step_index=f"{i}.{br_idx}.{sub_step_idx}")
                         writer.add_node_to_graph({
                             "id": f"{br.name}.{sub_node.id}", "name": sub_node.name, "type": "step",
@@ -563,6 +578,9 @@ class Chain:
         console.print("") # Spacer
         # --- End Pre-Run Summary ---
 
+        # Initialize set to track activated lazy engines for this run
+        self.activated_lazy_engines = set()
+
         # Write initial inputs
         writer.write_step("input", inputs)
         writer.add_node_to_graph({
@@ -578,50 +596,62 @@ class Chain:
         total_steps = self._calculate_total_steps()
 
         # Execute chain steps with progress tracking
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[blue]{task.description}"),
-            BarColumn(bar_width=None, complete_style=STYLE["success"]),
-            TaskProgressColumn(),  # Shows clearer fraction completed X/Y
-            TimeElapsedColumn(),
-            console=console,
-            transient=False
-        ) as progress:
-            # Use a mutable object to track progress across function calls
-            completed_steps = [0]
-            chain_task = progress.add_task("Initializing...", total=total_steps)
+        try:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[blue]{task.description}"),
+                BarColumn(bar_width=None, complete_style=STYLE["success"]),
+                TaskProgressColumn(),  # Shows clearer fraction completed X/Y
+                TimeElapsedColumn(),
+                console=console,
+                transient=False
+            ) as progress:
+                # Use a mutable object to track progress across function calls
+                completed_steps = [0]
+                chain_task = progress.add_task("Initializing...", total=total_steps)
 
-            for i, node in enumerate(self.steps):
-                desc = self._get_node_description(node, i, len(self.steps))
-                progress.update(chain_task, description=desc)
+                for i, node in enumerate(self.steps):
+                    desc = self._get_node_description(node, i, len(self.steps))
+                    progress.update(chain_task, description=desc)
 
-                step_outputs = self._execute_node(node, current_records, writer, 
-                                                i, run_id, progress, chain_task, completed_steps)
-                
-                # Process outputs if any
-                if isinstance(node, list):
-                    current_records = step_outputs
-                    is_parallel_steps_type = all(isinstance(n, (Step, ApplyNode)) for n in node) if node else False
-                    block_id = f"parallel_steps_output_{i}" if is_parallel_steps_type else f"parallel_branches_output_{i}"
-                    if current_records:
-                         writer.write_step(block_id, current_records)
+                    step_outputs = self._execute_node(node, current_records, writer, 
+                                                    i, run_id, progress, chain_task, completed_steps)
                     
-                elif step_outputs:
-                    node_id_for_writer = node.id if hasattr(node, 'id') and node.id else \
-                                       (node.name if hasattr(node, 'name') and node.name else f"unknown_node_{i}")
-                    writer.write_step(node_id_for_writer, step_outputs)
-                    current_records = step_outputs
-                else:
-                    if isinstance(node, (Step, ApplyNode)):
-                        console.print(f"{SYMBOLS['warning']} Node {i+1} ('{getattr(node, 'name', 'Unnamed')}') produced None/empty output.", style=STYLE["warning"])
-                    current_records = []
-                    
-                if not current_records and i < len(self.steps) - 1:
-                    console.print(f"{SYMBOLS['warning']} No records to process. Stopping chain execution.", style=STYLE["warning"])
-                    progress.update(chain_task, completed=total_steps, description="Chain stopped early.")
-                    break
+                    # Process outputs if any
+                    if isinstance(node, list):
+                        current_records = step_outputs
+                        is_parallel_steps_type = all(isinstance(n, (Step, ApplyNode)) for n in node) if node else False
+                        block_id = f"parallel_steps_output_{i}" if is_parallel_steps_type else f"parallel_branches_output_{i}"
+                        if current_records:
+                            writer.write_step(block_id, current_records)
+                        
+                    elif step_outputs:
+                        node_id_for_writer = node.id if hasattr(node, 'id') and node.id else \
+                                           (node.name if hasattr(node, 'name') and node.name else f"unknown_node_{i}")
+                        writer.write_step(node_id_for_writer, step_outputs)
+                        current_records = step_outputs
+                    else:
+                        if isinstance(node, (Step, ApplyNode)):
+                            console.print(f"{SYMBOLS['warning']} Node {i+1} ('{getattr(node, 'name', 'Unnamed')}') produced None/empty output.", style=STYLE["warning"])
+                        current_records = []
+                        
+                    if not current_records and i < len(self.steps) - 1:
+                        console.print(f"{SYMBOLS['warning']} No records to process. Stopping chain execution.", style=STYLE["warning"])
+                        progress.update(chain_task, completed=total_steps, description="Chain stopped early.")
+                        break
 
-            progress.update(chain_task, description="Chain completed.", completed=total_steps)
+                progress.update(chain_task, description="Chain completed.", completed=total_steps)
+        finally:
+            if self.activated_lazy_engines:
+                console.print(f"\n{SYMBOLS['info']}Cleaning up {len(self.activated_lazy_engines)} activated lazy engine(s)...", style=STYLE["info"])
+                for engine_name in self.activated_lazy_engines:
+                    try:
+                        console.print(f"  {SYMBOLS['info']}Attempting to shut down lazy engine: '{engine_name}'", style=STYLE.get("info_dim", "dim"))
+                        kill_engine(engine_name)
+                        console.print(f"    {SYMBOLS['success']}Successfully shut down '{engine_name}'.", style="dim green")
+                    except Exception as e:
+                        console.print(f"    {SYMBOLS['error']}Error shutting down lazy engine '{engine_name}': {e}", style="dim red")
+                self.activated_lazy_engines.clear()  # Clear for potential subsequent uses of the Chain instance if any
 
         console.print(f"\n{SYMBOLS['chain']}Finalizing output...", style=STYLE["info"])
         ds_dict = writer.finalize(generate_flattened_output=generate_flattened_output)

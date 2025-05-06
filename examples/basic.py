@@ -5,7 +5,7 @@ class Question(BaseModel): q: str
 class Answer(BaseModel): a: str
 
 register_engine(
-    name="llama3", model="meta-llama/Llama-3.2-3B-Instruct",
+    name="llama3", model="/lustre/fsn1/projects/rech/rua/uvb79kr/google--gemma-3-4b-it",
     dtype="bfloat16", gpu_memory_utilization=0.9, lazy=True, max_model_len=2048
 )
 
@@ -18,5 +18,6 @@ ask = Step(
 )
 
 chain = Chain(name="Q&A", steps=[ask])
-out = chain.run([Question(q="Capital of France?")])
-print(out["ask"][0])
+out = chain.run([Question(q="Capital of France?"), Question(q="Capital of Italy?")])
+print(out)
+print(out[0].a)

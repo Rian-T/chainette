@@ -89,7 +89,7 @@ class FinalizeInput(BaseModel):
 
 register_engine(
     name="llama3",
-    model="meta-llama/Llama-3.2-3B-Instruct",
+    model="/lustre/fsn1/projects/rech/rua/uvb79kr/Qwen--Qwen2.5-32B-Instruct",
     dtype="float16",
     gpu_memory_utilization=0.95,
     lazy=True,
