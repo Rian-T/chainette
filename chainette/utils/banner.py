@@ -89,7 +89,7 @@ class ChainetteBanner:
             box=box.SQUARE, # Using a box style
             border_style=self.border_color,
             padding=(1, 2), # Add some padding for aesthetics
-            expand=False,
+            expand=True,
         )
 
     def display(self) -> None:

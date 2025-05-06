@@ -100,6 +100,36 @@ class EngineConfig(BaseModel):
         }
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, EngineConfig):
+            return NotImplemented
+        return (
+            self.name == other.name and
+            self.model == other.model and
+            sorted(self.devices) == sorted(other.devices) and
+            self.lazy == other.lazy and
+            self.dtype == other.dtype and
+            self.max_model_len == other.max_model_len and
+            self.gpu_memory_utilization == other.gpu_memory_utilization and
+            self.enable_reasoning == other.enable_reasoning and
+            self.reasoning_parser == other.reasoning_parser and
+            self.extra == other.extra
+        )
+
+    def __hash__(self) -> int:
+        return hash((
+            self.name,
+            self.model,
+            tuple(sorted(self.devices)),
+            self.lazy,
+            self.dtype,
+            self.max_model_len,
+            self.gpu_memory_utilization,
+            self.enable_reasoning,
+            self.reasoning_parser,
+            tuple(sorted(self.extra.items()))
+        ))
+
 
 # ---------------------------------------------------------------------------
 # Global registry

@@ -45,8 +45,9 @@ register_engine(
     dtype="bfloat16",
     gpu_memory_utilization=0.9,
     enable_reasoning=False,
-    lazy=True,
+    lazy=False,
     max_model_len=12338,
+    devices=[0],
 )
 
 register_engine(
@@ -56,8 +57,9 @@ register_engine(
     gpu_memory_utilization=0.9,
     enable_reasoning=True,
     reasoning_parser="deepseek_r1",
-    lazy=True,
+    lazy=False,
     max_model_len=8192,
+    devices=[1],
 )
 
 # Prompt Templates
@@ -214,7 +216,7 @@ clinical_qa_chain = Chain(
             Branch(name="translate_es", steps=[translate_es_step]),
         ],
     ],
-    batch_size=1,
+    batch_size=5,
 )
 
 if __name__ == "__main__":
@@ -233,7 +235,7 @@ if __name__ == "__main__":
         full_dataset = concatenate_datasets(datasets)
         
         # Select 100 samples
-        sample_size = 100
+        sample_size = 10
         sample_size = min(sample_size, len(full_dataset))
         sample_data = list(full_dataset.select(range(sample_size)))
         

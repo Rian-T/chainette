@@ -13,6 +13,7 @@ import datetime as _dt
 import itertools
 from pathlib import Path
 from typing import Any, List, Dict, Union, Optional
+import threading  # Added import
 
 from datasets import DatasetDict
 from pydantic import BaseModel
@@ -23,8 +24,8 @@ from chainette.core.apply import ApplyNode
 from chainette.core.branch import Branch, Node
 from chainette.io.writer import RunWriter, flatten_datasetdict
 from chainette.utils.ids import snake_case, new_run_id
-from chainette.engine.registry import get_engine_config
-from chainette.engine.runtime import kill_engine  # Added import
+from chainette.engine.registry import EngineConfig, get_engine_config
+from chainette.engine.runtime import kill_engine, spawn_engine
 from chainette.utils.constants import SYMBOLS, STYLE
 from chainette.utils.banner import ChainetteBanner  # Import the new banner class
 
@@ -218,12 +219,33 @@ class Chain:
         else:
             return f"{step_label}: (Type: {type(node).__name__})"
 
+    def _collect_engine_configs(self, node: Any, configs: set[EngineConfig]):
+        """Recursively collect unique EngineConfig objects from all Step nodes."""
+        if isinstance(node, Step):
+            try:
+                cfg = get_engine_config(node.engine_name)
+                configs.add(cfg)
+            except ValueError:
+                # Engine config not found, could log a warning if necessary
+                # For now, we'll let spawn_engine handle this error later if the step is run
+                pass
+        elif isinstance(node, Branch):
+            for sub_node in node.steps:
+                self._collect_engine_configs(sub_node, configs)
+        elif isinstance(node, list):
+            for sub_node in node:  # Iterate through items in the parallel list
+                self._collect_engine_configs(sub_node, configs)
+
     def _execute_node(self, node: Any, current_records: List[Any], writer: RunWriter, 
                      i: int, run_id: str, progress: Progress, chain_task: int, completed_steps: List[int]) -> List[Any]:
         """Execute a single node in the chain and return its outputs."""
         node_info = {}
         console = Console()  # Added console instance
         
+        # Get the description of the main chain task for this node
+        # This will be used as a prefix for the Step's item-level progress
+        current_chain_task_description = progress.tasks[progress.task_ids.index(chain_task)].description if chain_task in progress.task_ids else ""
+
         if isinstance(node, Step):
             node_info = {
                 "id": node.id,
@@ -244,7 +266,16 @@ class Chain:
                 if engine_cfg.lazy:
                     self.activated_lazy_engines.add(node.engine_name)
 
-                outputs = node.run(current_records, run_id=run_id, step_index=i)
+                # Pass batch_size, main_progress, and parent_description_prefix to the step's run method
+                outputs = node.run(
+                    current_records, 
+                    run_id=run_id, 
+                    step_index=i, 
+                    batch_size=self.batch_size,
+                    main_progress=progress, # Pass the chain's progress object
+                    parent_description_prefix=current_chain_task_description # Pass current chain task's description
+                )
+                
                 node_info["signature"] = node.signature()
                 completed_steps[0] += 1
                 progress.update(chain_task, completed=completed_steps[0])
@@ -293,7 +324,8 @@ class Chain:
             if is_parallel_steps:
                 # This is parallel execution of steps/applynodes
                 outputs = self._execute_parallel_steps(
-                    node, current_records, writer, i, run_id, progress, chain_task, completed_steps
+                    node, current_records, writer, i, run_id, progress, chain_task, completed_steps,
+                    parent_description_prefix=current_chain_task_description
                 )
                 return outputs
             else:
@@ -304,7 +336,8 @@ class Chain:
                     raise TypeError(f"List at step {i+1} must contain only Branch objects for parallel branch execution.")
 
                 outputs = self._execute_branches(
-                    node, current_records, writer, i, run_id, progress, chain_task, completed_steps
+                    node, current_records, writer, i, run_id, progress, chain_task, completed_steps,
+                    parent_description_prefix=current_chain_task_description
                 )
                 return outputs
             
@@ -338,7 +371,8 @@ class Chain:
         run_id: str,
         progress: Progress,
         chain_task: int,
-        completed_steps: List[int]
+        completed_steps: List[int],
+        parent_description_prefix: str = "" # Added
     ) -> List[Dict[str, Any]]:
         """Executes a list of Step or ApplyNode objects in parallel on the same input records.
         The output for each input record is a dictionary of {node_id: output}.
@@ -381,7 +415,16 @@ class Chain:
                         engine_cfg = get_engine_config(p_node.engine_name)
                         if engine_cfg.lazy:
                             self.activated_lazy_engines.add(p_node.engine_name)
-                        node_output_list = p_node.run(node_specific_input, run_id=run_id, step_index=step_index)
+                        
+                        # Construct a specific prefix for this parallel step
+                        parallel_step_desc_prefix = f"{parent_description_prefix} -> Parallel '{p_node.name}'"
+                        node_output_list = p_node.run(
+                            node_specific_input, 
+                            run_id=run_id, 
+                            step_index=step_index, # or a more specific index like f"{step_index}.{node_idx}"
+                            main_progress=progress,
+                            parent_description_prefix=parallel_step_desc_prefix
+                        )
                         node_info["signature"] = p_node.signature()
                     elif isinstance(p_node, ApplyNode):
                         node_output_list = p_node.run(node_specific_input)
@@ -406,7 +449,9 @@ class Chain:
 
     def _execute_branches(self, branches: List[Branch], current_records: List[Any], 
                          writer: RunWriter, i: int, run_id: str, 
-                         progress: Progress, chain_task: int, completed_steps: List[int]) -> List[Dict[str, Any]]:
+                         progress: Progress, chain_task: int, completed_steps: List[int],
+                         parent_description_prefix: str = "" # Added
+                         ) -> List[Dict[str, Any]]:
         """Execute a list of branches in parallel.
         The output for each input record is a dictionary of {branch_name: final_branch_output}.
         Returns a list of these dictionaries.
@@ -459,11 +504,13 @@ class Chain:
             for sub_step_idx, sub_node in enumerate(br.steps):
                 sub_step_label = f"Step {i+1}.{br_idx+1}.{sub_step_idx+1}"
                 sub_node_name = f"'{sub_node.name}'" if hasattr(sub_node, 'name') and sub_node.name else f"({sub_node.id})"
-                branch_progress_desc = (
-                    f"Step {i+1}/{len(self.steps)}: Branch [u]{br.name}[/u] ({br_idx+1}/{len(branches)}) "
+                
+                # Update the main chain task description for this specific sub-step
+                current_branch_sub_step_desc = (
+                    f"{parent_description_prefix} -> Branch [u]{br.name}[/u] ({br_idx+1}/{len(branches)}) "
                     f"→ {sub_step_label} {sub_node_name}"
                 )
-                progress.update(chain_task, description=branch_progress_desc)
+                progress.update(chain_task, description=current_branch_sub_step_desc)
 
                 node_outputs_for_branch_step = []
                 try:
@@ -473,7 +520,13 @@ class Chain:
                         if engine_cfg.lazy:
                             self.activated_lazy_engines.add(sub_node.engine_name)
 
-                        node_outputs_for_branch_step = sub_node.run(current_branch_records, run_id=run_id, step_index=f"{i}.{br_idx}.{sub_step_idx}")
+                        node_outputs_for_branch_step = sub_node.run(
+                            current_branch_records, 
+                            run_id=run_id, 
+                            step_index=f"{i}.{br_idx}.{sub_step_idx}",
+                            main_progress=progress,
+                            parent_description_prefix=current_branch_sub_step_desc # Pass the detailed description
+                        )
                         writer.add_node_to_graph({
                             "id": f"{br.name}.{sub_node.id}", "name": sub_node.name, "type": "step",
                             "branch": br.name, "signature": sub_node.signature(), "index": f"{i}.{br_idx}.{sub_step_idx}"
@@ -562,6 +615,18 @@ class Chain:
         console = Console()
         self._display_banner(console) # Display banner here
 
+        # Initialize set to track activated lazy engines for this run
+        # This must be initialized before any step execution that might add to it.
+        self.activated_lazy_engines = set()
+
+        # Store chain context in thread local for access by Steps
+        from threading import current_thread
+        thread_locals = getattr(current_thread(), "__dict__", {})
+        thread_locals["chain_context"] = {
+            "batch_size": self.batch_size,
+            "chain_name": self.name,
+        }
+        
         run_id = new_run_id()
         out_root = Path(output_dir) / f"{snake_case(self.name)}_{run_id}"
         writer = RunWriter(out_root, max_lines_per_file, fmt)
@@ -575,11 +640,47 @@ class Chain:
         summary_tree.add(f"{SYMBOLS['info']}Batch Size: {self.batch_size}")
         
         console.print(Panel(summary_tree, border_style=STYLE["info"], expand=False))
-        console.print("") # Spacer
-        # --- End Pre-Run Summary ---
+        
+        # --- Pre-launch non-lazy engines ---
+        all_engine_configs = set()
+        for step_node_in_chain in self.steps:  # Iterate over top-level steps/branches/lists
+            self._collect_engine_configs(step_node_in_chain, all_engine_configs)
 
-        # Initialize set to track activated lazy engines for this run
-        self.activated_lazy_engines = set()
+        non_lazy_engines_to_prelaunch = {cfg for cfg in all_engine_configs if not cfg.lazy}
+
+        if non_lazy_engines_to_prelaunch:
+            console.print(f"\n{SYMBOLS['info']}Initiating pre-launch of {len(non_lazy_engines_to_prelaunch)} non-lazy engine(s)...", style=STYLE["info"])
+            pre_launch_threads = []
+            engine_launch_statuses: Dict[str, Union[str, Exception]] = {}
+
+            def _launch_engine_wrapper(engine_cfg_to_launch: EngineConfig):
+                try:
+                    # Each spawn_engine call is blocking until the engine is ready or confirmed running
+                    spawn_engine(engine_cfg_to_launch) 
+                    engine_launch_statuses[engine_cfg_to_launch.name] = "success"
+                    console.print(f"  {SYMBOLS['success']}Engine '{engine_cfg_to_launch.name}' is ready or was already running.", style="dim green")
+                except Exception as e_launch:
+                    engine_launch_statuses[engine_cfg_to_launch.name] = e_launch
+                    console.print(f"  {SYMBOLS['error']}Failed to ensure engine '{engine_cfg_to_launch.name}' is running: {e_launch}", style="dim red")
+
+            for engine_cfg in non_lazy_engines_to_prelaunch:
+                console.print(f"  {SYMBOLS['info']}Ensuring non-lazy engine '{engine_cfg.name}' is running...", style=STYLE.get("info_dim", "dim"))
+                thread = threading.Thread(target=_launch_engine_wrapper, args=(engine_cfg,))
+                pre_launch_threads.append(thread)
+                thread.start()
+
+            for thread in pre_launch_threads:
+                thread.join()  # Wait for all pre-launch attempts to complete
+
+            failed_launches = {name: err for name, err in engine_launch_statuses.items() if err != "success"}
+            if failed_launches:
+                console.print(f"{SYMBOLS['error']}One or more non-lazy engines failed to start or become healthy:", style=STYLE["error"])
+                for name, err_msg in failed_launches.items():
+                    console.print(f"  - {name}: {err_msg}", style=STYLE["error"])
+                raise RuntimeError("Failed to pre-launch critical non-lazy engines. Aborting chain.")
+        
+        console.print("")  # Spacer
+        # --- End Pre-Run Summary & Pre-launch ---
 
         # Write initial inputs
         writer.write_step("input", inputs)

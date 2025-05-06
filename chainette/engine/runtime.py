@@ -187,9 +187,10 @@ class LiveEngine:  # noqa: D401
 
 
 _LIVE: Dict[str, LiveEngine] = {}
+_SPAWN_LOCK = threading.Lock()  # Global lock for synchronizing port allocation and process spawning
 
 
-def spawn_engine(cfg: EngineConfig, *, force: bool = False, wait: float = 1200.0) -> LiveEngine:  # noqa: WPS231
+def spawn_engine(cfg: EngineConfig, *, force: bool = False, wait: float = 3600.0) -> LiveEngine:  # noqa: WPS231
     """Ensure a vLLM server matching *cfg* is running.
 
     If a live server with the same *name* **and** matching `cfg_hash` exists,
@@ -208,70 +209,115 @@ def spawn_engine(cfg: EngineConfig, *, force: bool = False, wait: float = 1200.0
 
     logger.info(f"Ensuring engine '{cfg.name}' is running (force={force})")
 
-    # 1) attempt cache reuse --------------------------------------------------
-    cache_file = _cache_path(cfg.name)
-    if cache_file.exists() and not force:
-        data = json.loads(cache_file.read_text())
-        if cfg.cfg_hash() == data.get("cfg_hash") and _pid_alive(int(data["pid"])):
-            live = LiveEngine.from_cache(cfg.name, cfg, data)
-            if _health_check(live.port):
-                _LIVE[cfg.name] = live
-                return live  # reuse
+    # Check _LIVE first, outside the main lock for a quick path if already in memory and healthy.
+    # This requires _LIVE access to be somewhat atomic or for is_healthy to be robust.
+    # For simplicity and stronger consistency, all checks and modifications related to
+    # _LIVE and cache files will be under the _SPAWN_LOCK.
+    
+    with _SPAWN_LOCK:
+        # Check in-memory _LIVE state first
+        if cfg.name in _LIVE and not force:
+            live_engine_in_memory = _LIVE[cfg.name]
+            if live_engine_in_memory.config.cfg_hash() == cfg.cfg_hash() and live_engine_in_memory.is_healthy():
+                logger.info(f"Reusing in-memory live and healthy engine '{cfg.name}' (PID: {live_engine_in_memory.pid}, Port: {live_engine_in_memory.port}).")
+                return live_engine_in_memory
 
-    # 2) if here → need fresh process ----------------------------------------
-    if cache_file.exists():
+        # 1) attempt cache reuse from disk --------------------------------------------------
+        cache_file = _cache_path(cfg.name)
+        if cache_file.exists() and not force:
+            try:
+                data = json.loads(cache_file.read_text())
+                if cfg.cfg_hash() == data.get("cfg_hash") and _pid_alive(int(data["pid"])):
+                    live = LiveEngine.from_cache(cfg.name, cfg, data)
+                    if _health_check(live.port): # Final health check before reuse
+                        _LIVE[cfg.name] = live # Update _LIVE cache
+                        logger.info(f"Reusing disk-cached, verified, and healthy engine '{cfg.name}' (PID: {live.pid}, Port: {live.port}).")
+                        return live  # reuse
+            except (json.JSONDecodeError, ValueError) as e:
+                logger.warning(f"Error reading or parsing cache file for '{cfg.name}', will attempt to start fresh: {e}")
+                # Proceed to terminate and start fresh if cache is corrupted
+
+        # 2) if here → need fresh process ----------------------------------------
+        # Terminate existing process if any (from cache or if force=True)
+        existing_pid_to_terminate = None
+        if cache_file.exists():
+            try:
+                data = json.loads(cache_file.read_text())
+                existing_pid_to_terminate = int(data["pid"])
+            except (json.JSONDecodeError, ValueError, KeyError) as e:
+                logger.warning(f"Could not determine PID from cache file for '{cfg.name}' for termination: {e}")
+            
+            if existing_pid_to_terminate and _pid_alive(existing_pid_to_terminate):
+                logger.info(f"Terminating existing process {existing_pid_to_terminate} for engine '{cfg.name}' (due to force, mismatch, or unhealthiness).")
+                _terminate_pid(existing_pid_to_terminate)
+            elif existing_pid_to_terminate:
+                logger.info(f"Existing process for engine '{cfg.name}' (PID: {existing_pid_to_terminate} from cache) was not alive.")
+            
+            cache_file.unlink(missing_ok=True) # Clean up old cache file
+
+        # Also remove from _LIVE if it was there but not reused (e.g. stale, unhealthy, or force)
+        if cfg.name in _LIVE:
+            stale_live_engine = _LIVE.pop(cfg.name)
+            if stale_live_engine.pid != existing_pid_to_terminate and _pid_alive(stale_live_engine.pid):
+                # This case might happen if _LIVE had a PID different from cache, and cache was preferred for termination.
+                logger.info(f"Terminating stale in-memory tracked engine '{cfg.name}' (PID: {stale_live_engine.pid}) as well.")
+                _terminate_pid(stale_live_engine.pid)
+
+
+        port = _find_free_port()
+        cmd, env_vars = _build_vllm_command(cfg, port)
+
+        logger.info(f"Starting vLLM server for '{cfg.name}' on port {port}. Logs: {_LOGS_DIR}/{cfg.name}.log")
+
+        engine_logger = _get_engine_logger(cfg.name)
+        log_file_path = _LOGS_DIR / f"{cfg.name}.log"
+
         try:
-            pid_to_kill = int(json.loads(cache_file.read_text())["pid"])
-            logger.info(f"Terminating existing process {pid_to_kill} for engine '{cfg.name}'")
-            _terminate_pid(pid_to_kill)
+            with open(log_file_path, 'a') as log_f:
+                process_env = os.environ.copy()
+                process_env.update(env_vars)
+                if env_vars:
+                    env_vars_str = ", ".join(f"{k}={v}" for k, v in env_vars.items())
+                    logger.info(f"Using environment variables: {env_vars_str}")
+                
+                process_handle = subprocess.Popen(
+                    cmd,
+                    stdout=log_f,
+                    stderr=log_f,
+                    text=True,
+                    env=process_env
+                )
         except Exception as e:
-            logger.warning(f"Failed to terminate existing process for '{cfg.name}': {e}")
-        cache_file.unlink(missing_ok=True)
+            logger.error(f"Failed to start vLLM process for '{cfg.name}': {e}")
+            raise
 
-    port = _find_free_port()
-    cmd = _build_vllm_command(cfg, port)
+        logger.info(f"vLLM server process for '{cfg.name}' started with PID {process_handle.pid}")
+        # The lock is held until Popen returns.
 
-    logger.info(f"Starting vLLM server for '{cfg.name}' on port {port}. Logs: {_LOGS_DIR}/{cfg.name}.log")
-
-    # Get logger and log file path
-    engine_logger = _get_engine_logger(cfg.name)
-    log_file_path = _LOGS_DIR / f"{cfg.name}.log"
-
-    # Start process with stdout/stderr redirected to the log file
-    try:
-        with open(log_file_path, 'a') as log_f:
-            process = subprocess.Popen(
-                cmd,
-                stdout=log_f,
-                stderr=log_f,
-                text=True,
-            )
-    except Exception as e:
-        logger.error(f"Failed to start vLLM process for '{cfg.name}': {e}")
-        raise
-
-    # Log startup info to the main log as well (briefly)
-    logger.info(f"vLLM server process for '{cfg.name}' started with PID {process.pid}")
-
-    # 3) poll for readiness ---------------------------------------------------
+    # 3) poll for readiness (outside the main spawn lock for this part) ------
+    # The 'process' variable from the locked section is now 'process_handle'
     logger.info(f"Waiting for vLLM server '{cfg.name}' on port {port} to become ready (timeout: {wait}s)...")
     deadline = time.time() + wait
     while time.time() < deadline:
         if _health_check(port):
             logger.info(f"vLLM server '{cfg.name}' is ready on port {port}")
             break
-        if process.poll() is not None:  # crashed
-            logger.error(f"vLLM server for '{cfg.name}' exited early with code {process.returncode}. Check logs: {log_file_path}")
+        if process_handle.poll() is not None:  # crashed
+            logger.error(f"vLLM server for '{cfg.name}' exited early with code {process_handle.returncode}. Check logs: {log_file_path}")
             raise RuntimeError(f"vLLM server for '{cfg.name}' exited early. Check logs in {log_file_path}")
         time.sleep(0.5)
     else:
-        process.kill()
+        process_handle.kill()
         logger.error(f"Timed out waiting for vLLM server '{cfg.name}' to become ready. Check logs: {log_file_path}")
         raise TimeoutError(f"Timed out waiting for vLLM server '{cfg.name}' to become ready")
 
-    live = LiveEngine(cfg.name, cfg, process.pid, port)
-    cache_file.write_text(json.dumps(live.to_dict(), indent=2))
-    _LIVE[cfg.name] = live
+    live = LiveEngine(cfg.name, cfg, process_handle.pid, port)
+    
+    # Safely update shared resources (_LIVE and cache file) after successful start and health check
+    with _SPAWN_LOCK:
+        cache_file = _cache_path(cfg.name) # Re-evaluate cache_path, though it's deterministic
+        cache_file.write_text(json.dumps(live.to_dict(), indent=2))
+        _LIVE[cfg.name] = live
     return live
 
 
@@ -282,24 +328,65 @@ def spawn_engine(cfg: EngineConfig, *, force: bool = False, wait: float = 1200.0
 
 def kill_engine(name: str, *, timeout: float = 5.0) -> None:
     """Terminate the engine named *name* if running."""
+    with _SPAWN_LOCK: # Protect access to _LIVE and cache file
+        cache_file = _cache_path(name)
+        pid_to_kill = None
+        
+        if name in _LIVE:
+            pid_to_kill = _LIVE[name].pid
+            logger.info(f"Found engine '{name}' in _LIVE (PID: {pid_to_kill}). Preparing to terminate.")
 
-    cache_file = _cache_path(name)
-    if not cache_file.exists():
-        return
-
-    data = json.loads(cache_file.read_text())
-    pid = int(data["pid"])
-    _terminate_pid(pid, timeout=timeout)
-    cache_file.unlink(missing_ok=True)
-    _LIVE.pop(name, None)
+        if cache_file.exists():
+            try:
+                data = json.loads(cache_file.read_text())
+                pid_from_cache = int(data["pid"])
+                if pid_to_kill is None:
+                    pid_to_kill = pid_from_cache
+                    logger.info(f"Found engine '{name}' in cache (PID: {pid_from_cache}). Preparing to terminate.")
+                elif pid_to_kill != pid_from_cache:
+                    logger.warning(f"PID for '{name}' in _LIVE ({pid_to_kill}) differs from cache ({pid_from_cache}). Will terminate PID from _LIVE if alive, then PID from cache if different and alive.")
+                    if _pid_alive(pid_to_kill):
+                         _terminate_pid(pid_to_kill, timeout=timeout)
+                    pid_to_kill = pid_from_cache # Prioritize cache for the main termination attempt if different
+                
+                cache_file.unlink(missing_ok=True) # Remove cache file
+            except (json.JSONDecodeError, ValueError, KeyError) as e:
+                logger.warning(f"Error reading cache file for engine '{name}' during kill: {e}. Will still attempt to kill if PID known from _LIVE.")
+                if cache_file.exists(): # Attempt to remove corrupted cache file
+                    cache_file.unlink(missing_ok=True)
+        
+        if pid_to_kill and _pid_alive(pid_to_kill):
+            logger.info(f"Terminating engine '{name}' (PID: {pid_to_kill}).")
+            _terminate_pid(pid_to_kill, timeout=timeout)
+        elif pid_to_kill:
+            logger.info(f"Engine '{name}' (PID: {pid_to_kill}) was already terminated or PID was invalid.")
+        else:
+            logger.info(f"Engine '{name}' not found in _LIVE or cache for termination.")
+            
+        _LIVE.pop(name, None) # Remove from _LIVE cache
 
 
 def kill_all_engines() -> None:
     """Terminate *all* cached engines."""
+    # No need to acquire lock for list(_CACHE_DIR.glob("*.json")) itself
+    # kill_engine will acquire the lock for each individual engine.
+    cached_engine_names = [cache.stem for cache in list(_CACHE_DIR.glob("*.json"))]
+    
+    # Also consider engines that might only be in _LIVE (e.g., if cache was manually deleted)
+    # Use a copy of keys for safe iteration if kill_engine modifies _LIVE
+    live_engine_names = []
+    with _SPAWN_LOCK: # Protect reading _LIVE keys
+        live_engine_names = list(_LIVE.keys())
 
-    for cache in list(_CACHE_DIR.glob("*.json")):
-        name = cache.stem
-        kill_engine(name)
+    all_names_to_kill = set(cached_engine_names + live_engine_names)
+    
+    if not all_names_to_kill:
+        logger.info("No engines found in cache or live memory to kill.")
+        return
+
+    logger.info(f"Attempting to kill all ({len(all_names_to_kill)}) known engines: {', '.join(all_names_to_kill)}")
+    for name in all_names_to_kill:
+        kill_engine(name) # kill_engine handles its own locking
 
 
 # ---------------------------------------------------------------------------
@@ -325,10 +412,15 @@ def _terminate_pid(pid: int, *, timeout: float = 5.0) -> None:  # noqa: D401
         pass  # already dead
 
 
-def _build_vllm_command(cfg: EngineConfig, port: int) -> List[str]:  # noqa: D401
-    """Translate *cfg* into a `vllm serve` command."""
+def _build_vllm_command(cfg: EngineConfig, port: int) -> tuple[List[str], Dict[str, str]]:  # noqa: D401
+    """Translate *cfg* into a `vllm serve` command and environment variables.
+    
+    Returns:
+        A tuple of (command_list, environment_variables)
+    """
 
-    cmd: List[str] = [
+    # Build the vllm command portion
+    vllm_cmd: List[str] = [
         "vllm",
         "serve",
         cfg.model,
@@ -339,24 +431,34 @@ def _build_vllm_command(cfg: EngineConfig, port: int) -> List[str]:  # noqa: D40
         "--gpu-memory-utilization",
         str(cfg.gpu_memory_utilization),
         "--max-model-len",
-        str(cfg.max_model_len) if cfg.max_model_len else "2048",
+        str(cfg.max_model_len) if cfg.max_model_len else "4096",
     ]
 
     if cfg.enable_reasoning:
-        cmd += ["--enable-reasoning"]
-        if cfg.reasoning_parser:
-            cmd += ["--reasoning-parser", cfg.reasoning_parser]
+        vllm_cmd += ["--enable-reasoning"]
+    if cfg.reasoning_parser:
+        vllm_cmd += ["--reasoning-parser", cfg.reasoning_parser]
 
     if len(cfg.devices) > 1:
-        cmd += ["--tensor-parallel-size", str(len(cfg.devices))]
+        vllm_cmd += ["--tensor-parallel-size", str(len(cfg.devices))]
 
     # extra kwargs (truthy only)
     for k, v in cfg.extra.items():
         flag = f"--{k.replace('_', '-')}"
         if isinstance(v, bool):
             if v:
-                cmd.append(flag)
+                vllm_cmd.append(flag)
         else:
-            cmd += [flag, str(v)]
+            vllm_cmd += [flag, str(v)]
 
-    return cmd
+    # Create environment variables dict instead of prefixing the command
+    env_vars = {}
+    if cfg.devices:
+        devices_str = ",".join(map(str, cfg.devices))
+        env_vars["CUDA_VISIBLE_DEVICES"] = devices_str
+
+    # print the command for debugging
+    logger.debug(f"vllm command: {' '.join(vllm_cmd)}")
+    logger.debug(f"Environment variables: {env_vars}")
+    
+    return vllm_cmd, env_vars
