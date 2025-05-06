@@ -34,5 +34,5 @@ STYLE = {
     "progress": "cyan",
     "progress_bar": "cyan",
     "progress_text": "blue",
-    # Banner colors removed - will be randomized
+    # Banner colors removed - will be randomized or use ChainetteBanner defaults
 }

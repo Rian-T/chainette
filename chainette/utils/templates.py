@@ -2,64 +2,52 @@ from __future__ import annotations
 
 """chainette.utils.templates
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Extremely lightweight replacements for double‑curly placeholders.
+Uses Jinja2 for flexible and powerful templating.
 
 Usage
 -----
 >>> from chainette.utils.templates import render
 >>> render("Hello {{name}}", {"name": "Alice"})
 'Hello Alice'
-
-No loops, no conditionals, only dotted‑path replacement.  To include a
-literal ``{{`` write ``{{{{``.
+>>> render("Items: {% for item in items %}- {{item}} {% endfor %}", {"items": ["A", "B"]})
+'Items: - A - B '
 """
 
-import re
 from typing import Any, Mapping
+from jinja2 import Environment, select_autoescape, FileSystemLoader, StrictUndefined
 
 __all__ = ["render"]
 
-_PATTERN = re.compile(r"\{\{\s*([\w\.]+)\s*\}\}")
+# Initialize Jinja2 environment
+# Using StrictUndefined to raise errors for undefined variables in templates
+env = Environment(
+    loader=FileSystemLoader("."),  # Dummy loader, not used for string templates
+    autoescape=select_autoescape(['html', 'xml']), # Though not strictly necessary for text prompts
+    undefined=StrictUndefined
+)
 
 
-def render(template: str, data: Mapping[str, Any]) -> str:  # noqa: D401
-    """Replace ``{{path}}`` occurrences in *template* with *data* values.
+def render(template_string: str, data: Mapping[str, Any]) -> str:  # noqa: D401
+    """Render the *template_string* with *data* using Jinja2.
 
-    Nested paths (``a.b.c``) are resolved by successive dict lookups.
-    Missing keys raise :class:`KeyError` – this is deliberate for early
-    failure rather than silent mistakes.
+    Args:
+        template_string: The template string with Jinja2 syntax.
+        data: A mapping of keys to values for template rendering.
+
+    Returns:
+        The rendered string.
+
+    Raises:
+        jinja2.exceptions.UndefinedError: If a variable in the template is not in data.
+        jinja2.exceptions.TemplateSyntaxError: For errors in template syntax.
     """
-
-    def _resolve_path(data_obj: Any, path_keys: list[str]) -> Any:
-        """Resolve nested path in dict or object attributes."""
-        current = data_obj
-        for key in path_keys:
-            if isinstance(current, Mapping):
-                if key not in current:
-                    raise KeyError(f"Missing key '{key}' in dict")
-                current = current[key]
-            elif hasattr(current, key):
-                current = getattr(current, key)
-            else:
-                raise AttributeError(f"Object has no attribute '{key}'")
-        return current
-
-    def _replace(match: re.Match[str]) -> str:  # noqa: D401
-        path_str = match.group(1)
-        path_keys = path_str.split(".")
-        try:
-            value = _resolve_path(data, path_keys)
-            return str(value)
-        except (KeyError, AttributeError) as exc:
-            raise KeyError(f"Missing key or attribute while resolving '{{{{{path_str}}}}}': {exc}") from exc
-        except Exception as exc: # Catch other potential errors during resolution
-             raise RuntimeError(f"Error resolving '{{{{{path_str}}}}}': {exc}") from exc
-
-    # Handle escaped braces first
-    processed_template = template.replace("{{{{", "__DOUBLE_LEFT_BRACE__").replace("}}}}", "__DOUBLE_RIGHT_BRACE__")
-    # Perform replacements
-    processed_template = _PATTERN.sub(_replace, processed_template)
-    # Restore escaped braces
-    processed_template = processed_template.replace("__DOUBLE_LEFT_BRACE__", "{{").replace("__DOUBLE_RIGHT_BRACE__", "}}")
-
-    return processed_template
+    try:
+        template = env.from_string(template_string)
+        return template.render(data)
+    except Exception as exc:
+        # Add more context to the exception
+        raise RuntimeError(
+            f"Error rendering template: {exc}\n"
+            f"Template: \"{template_string[:100]}{'...' if len(template_string) > 100 else ''}\"\n"
+            f"Data keys: {list(data.keys())}"
+        ) from exc

@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import itertools
-import random  # Import random module
 from pathlib import Path
 from typing import Any, List, Dict, Union, Optional
 
@@ -26,6 +25,7 @@ from chainette.io.writer import RunWriter, flatten_datasetdict
 from chainette.utils.ids import snake_case, new_run_id
 from chainette.engine.registry import get_engine_config
 from chainette.utils.constants import SYMBOLS, STYLE
+from chainette.utils.banner import ChainetteBanner  # Import the new banner class
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn, TaskProgressColumn
@@ -65,55 +65,18 @@ class Chain:
     # ------------------------------------------------------------------ #
 
     def _display_banner(self, console: Console):
-        """Displays the Chainette ASCII art banner with random colors."""
-        # Define a pool of nice colors for the banner - we'll use 4
-        colors = [
-            "bright_blue", "bright_cyan", "bright_green", "bright_magenta",
-            "bright_yellow", "blue", "cyan", "green", "magenta", "yellow",
-            "deep_sky_blue1", "spring_green1", "medium_purple1", "orange1"
-        ]
-        
-        # Select exactly 4 random colors from the pool
-        selected_colors = random.sample(colors, 4)
-        color1, color2, color3, color4 = selected_colors
-        
-        # Use the 4 colors consistently throughout the banner
-        chain_color = color1
-        links_color = color2
-        border_color = color3
-        accent_color = color4  # New fourth color
-
-        # --- ASCII Art Banner ---
-        o = f"[{links_color}]o[/]"
-        O = f"[{links_color}]O[/]"
-        d = f"[{links_color}]~[/]"  # Use ~ for dash
-        
-        # All letters in CHAINETTE use the same color
-        C = f"[{chain_color}]C[/]" 
-        H = f"[{chain_color}]H[/]"
-        A = f"[{chain_color}]A[/]"
-        I = f"[{chain_color}]I[/]"
-        N = f"[{chain_color}]N[/]"
-        E = f"[{chain_color}]E[/]"
-        T = f"[{chain_color}]T[/]"
-        
-        border = f"[{border_color}]~[/]"
-        spacing = f"[{accent_color}] [/]"  # Use the fourth color for spacing between letters
-
-        # Slightly larger banner design
-        banner = f"""
-    {border*60}
-              {o}{d}{d}{O}{d}{d}{o}{d}{d}{O}{d}{d}{o}              
-           {o}{d}{d}{O}{d}{d}{o}      {o}{d}{d}{O}{d}{d}{o}           
-        {o}{d}{d}{O}{d}{d}{o}            {o}{d}{d}{O}{d}{d}{o}        
-          {o}{d}{d}{O}{d}{d}{o}   {C}{spacing}{H}{spacing}{A}{spacing}{I}{spacing}{N}{spacing}{E}{spacing}{T}{spacing}{T}{spacing}{E}   {o}{d}{d}{O}{d}{d}{o}      
-        {o}{d}{d}{O}{d}{d}{o}            {o}{d}{d}{O}{d}{d}{o}        
-           {o}{d}{d}{O}{d}{d}{o}      {o}{d}{d}{O}{d}{d}{o}           
-              {o}{d}{d}{O}{d}{d}{o}{d}{d}{O}{d}{d}{o}              
-    {border*60}
-    """
-        console.print(banner, highlight=False)  # Use highlight=False to prevent Rich from re-interpreting our styles
-        # --- End Banner ---
+        """Displays the Chainette ASCII art banner."""
+        # Use a specific set of colors for the banner for consistency,
+        # or allow ChainetteBanner to use its defaults.
+        # For this example, we'll use some predefined "nice" colors.
+        banner = ChainetteBanner(
+            console=console,
+            # Example of customizing colors if desired:
+            # border_color="deep_sky_blue1",
+            # links_color="medium_purple1",
+            # accent_color="orange1"
+        )
+        banner.display()
 
     def _batched(self, items: list[Any]) -> List[List[Any]]:
         """Helper to divide items into batches."""
@@ -134,13 +97,21 @@ class Chain:
                 # Count each step in a branch
                 total += len(node.steps)
             elif isinstance(node, list):
-                # For parallel branches, count the maximum branch length
-                # This more accurately reflects time to completion
-                max_branch_steps = 0
-                for br in node:
-                    if isinstance(br, Branch):
-                        max_branch_steps = max(max_branch_steps, len(br.steps))
-                total += max_branch_steps
+                if not node:  # Empty list
+                    total += 1
+                    continue
+                # Check if it's a list of parallel steps/applynodes or parallel branches
+                is_parallel_steps = all(isinstance(n, (Step, ApplyNode)) for n in node)
+                if is_parallel_steps:
+                    # Parallel steps/applynodes count as 1 logical step
+                    total += 1
+                else:  # Assuming parallel branches
+                    # For parallel branches, count the maximum branch length
+                    max_branch_steps = 0
+                    for br in node:
+                        if isinstance(br, Branch):
+                            max_branch_steps = max(max_branch_steps, len(br.steps))
+                    total += max_branch_steps if max_branch_steps > 0 else 1
             else:
                 # Unknown nodes still count as 1 step
                 total += 1
@@ -156,7 +127,7 @@ class Chain:
             self._add_node_to_tree(steps_tree, node, str(i + 1))
             
         return summary_tree
-    
+
     def _add_node_to_tree(self, parent_tree: Tree, node: Any, index_prefix: str):
         """Helper function to recursively add nodes to the summary tree."""
         node_label = f"Step {index_prefix}"
@@ -194,14 +165,31 @@ class Chain:
                 self._add_node_to_tree(branch_subtree, sub_node, f"{index_prefix}.{j+1}")
 
         elif isinstance(node, list):
-             # Handle list of parallel nodes (likely branches)
-             parallel_subtree = parent_tree.add(f"Step {index_prefix}: Parallel Execution ({len(node)} branches)")
-             for j, parallel_node in enumerate(node):
-                 # Assume items in the list are executable nodes (like Branch)
-                 self._add_node_to_tree(parallel_subtree, parallel_node, f"{index_prefix}.{j+1}")
+            if not node:
+                parent_tree.add(f"{SYMBOLS['warning']} {node_label}: Empty Parallel Block")
+                return
 
+            is_parallel_steps = all(isinstance(n, (Step, ApplyNode)) for n in node)
+            if is_parallel_steps:
+                parallel_type_str = "Steps"
+                # Get names of parallel steps/applynodes
+                step_names = []
+                for n_idx, parallel_item in enumerate(node):
+                    item_name = parallel_item.name or f"Unnamed ({parallel_item.id})"
+                    item_emoji = getattr(parallel_item, 'emoji', SYMBOLS["step"] if isinstance(parallel_item, Step) else SYMBOLS["apply"])
+                    step_names.append(f"{item_emoji} {item_name}")
+                
+                parallel_subtree = parent_tree.add(f"{node_label}: Parallel {parallel_type_str} ({len(node)} tasks)")
+                for s_name in step_names:
+                    parallel_subtree.add(s_name)
+
+            else:  # Assuming parallel branches
+                parallel_subtree = parent_tree.add(f"Step {index_prefix}: Parallel Branches ({len(node)} branches)")
+                for j, parallel_node in enumerate(node):
+                    # Assume items in the list are executable nodes (like Branch)
+                    self._add_node_to_tree(parallel_subtree, parallel_node, f"{index_prefix}.{j+1}")
         else:
-             parent_tree.add(f"{SYMBOLS['warning']} {node_label}: Unknown Node Type ({type(node).__name__})")
+            parent_tree.add(f"{SYMBOLS['warning']} {node_label}: Unknown Node Type ({type(node).__name__})")
 
     def _get_node_description(self, node: Any, i: int, total_steps: int) -> str:
         """Generate a descriptive string for a node."""
@@ -214,10 +202,18 @@ class Chain:
         elif isinstance(node, Branch):
             return f"{step_label}: '{node.name}'" if node.name else f"{step_label}: Branch"
         elif isinstance(node, list):
-            branch_names = [b.name for b in node if isinstance(b, Branch) and hasattr(b, 'name')]
-            if branch_names:
-                return f"{step_label}: Branching: {', '.join(branch_names)}"
-            return f"{step_label}: Branching Point ({len(node)} paths)"
+            if not node:
+                return f"{step_label}: Empty Parallel Block"
+            
+            is_parallel_steps = all(isinstance(n, (Step, ApplyNode)) for n in node)
+            if is_parallel_steps:
+                names = [n.name or n.id for n in node]
+                return f"{step_label}: Parallel Steps: {', '.join(names)}"
+            else:  # Assuming parallel branches
+                branch_names = [b.name for b in node if isinstance(b, Branch) and hasattr(b, 'name')]
+                if branch_names:
+                    return f"{step_label}: Branching: {', '.join(branch_names)}"
+                return f"{step_label}: Branching Point ({len(node)} paths)"
         else:
             return f"{step_label}: (Type: {type(node).__name__})"
 
@@ -225,6 +221,7 @@ class Chain:
                      i: int, run_id: str, progress: Progress, chain_task: int, completed_steps: List[int]) -> List[Any]:
         """Execute a single node in the chain and return its outputs."""
         node_info = {}
+        console = Console()  # Added console instance
         
         if isinstance(node, Step):
             node_info = {
@@ -235,7 +232,7 @@ class Chain:
             }
             
             if not current_records:
-                Console().print(f"{SYMBOLS['warning']}Skipping Step '{node.name}' - empty input", style=STYLE["warning"])
+                console.print(f"{SYMBOLS['warning']}Skipping Step '{node.name}' - empty input", style=STYLE["warning"])
                 completed_steps[0] += 1
                 progress.update(chain_task, completed=completed_steps[0])
                 return []
@@ -247,7 +244,7 @@ class Chain:
                 progress.update(chain_task, completed=completed_steps[0])
                 return outputs
             except Exception as e:
-                Console().print(f"{SYMBOLS['error']}Error in Step '{node.name}': {e}", style=STYLE["error"])
+                console.print(f"{SYMBOLS['error']}Error in Step '{node.name}': {e}", style=STYLE["error"])
                 raise
                 
         elif isinstance(node, ApplyNode):
@@ -259,7 +256,7 @@ class Chain:
             }
             
             if not current_records:
-                Console().print(f"{SYMBOLS['warning']} Skipping Apply '{node.name}' - empty input", style=STYLE["warning"])
+                console.print(f"{SYMBOLS['warning']} Skipping Apply '{node.name}' - empty input", style=STYLE["warning"])
                 completed_steps[0] += 1
                 progress.update(chain_task, completed=completed_steps[0])
                 return []
@@ -270,13 +267,40 @@ class Chain:
                 progress.update(chain_task, completed=completed_steps[0])
                 return outputs
             except Exception as e:
-                Console().print(f"{SYMBOLS['error']} Error executing Apply node '{node.name}': {e}", style=STYLE["error"])
+                console.print(f"{SYMBOLS['error']} Error executing Apply node '{node.name}': {e}", style=STYLE["error"])
                 raise
                 
         elif isinstance(node, list):
-            # This is parallel branch execution
-            self._execute_branches(node, current_records, writer, i, run_id, progress, chain_task, completed_steps)
-            return []  # Branch execution managed separately
+            if not current_records:
+                console.print(f"{SYMBOLS['warning']}Skipping Parallel Block at step {i+1} - empty input", style=STYLE["warning"])
+                completed_steps[0] += 1  # Still counts as one logical step
+                progress.update(chain_task, completed=completed_steps[0])
+                return []
+
+            if not node:  # Empty list of nodes
+                console.print(f"{SYMBOLS['warning']}Skipping empty parallel block at step {i+1}", style=STYLE["warning"])
+                completed_steps[0] += 1  # Still counts as one logical step
+                progress.update(chain_task, completed=completed_steps[0])
+                return []
+
+            is_parallel_steps = all(isinstance(n, (Step, ApplyNode)) for n in node)
+            if is_parallel_steps:
+                # This is parallel execution of steps/applynodes
+                outputs = self._execute_parallel_steps(
+                    node, current_records, writer, i, run_id, progress, chain_task, completed_steps
+                )
+                return outputs
+            else:
+                if not all(isinstance(n, Branch) for n in node):
+                    console.print(f"{SYMBOLS['error']}Error: List at step {i+1} contains non-Branch items for parallel branch execution.", style=STYLE["error"])
+                    completed_steps[0] += self._count_steps_in_node(node)
+                    progress.update(chain_task, completed=completed_steps[0])
+                    raise TypeError(f"List at step {i+1} must contain only Branch objects for parallel branch execution.")
+
+                outputs = self._execute_branches(
+                    node, current_records, writer, i, run_id, progress, chain_task, completed_steps
+                )
+                return outputs
             
         elif isinstance(node, Branch):
             node_info = {
@@ -285,13 +309,13 @@ class Chain:
                 "emoji": getattr(node, 'emoji', SYMBOLS["branch"]),
                 "type": "branch"
             }
-            Console().print(f"{SYMBOLS['warning']} Branch execution logic needs review for '{node.name}'", style=STYLE["warning"])
+            console.print(f"{SYMBOLS['warning']} Branch execution logic needs review for '{node.name}'", style=STYLE["warning"])
             completed_steps[0] += 1
             progress.update(chain_task, completed=completed_steps[0])
             return current_records
             
         else:
-            Console().print(f"{SYMBOLS['warning']} Skipping unknown node type at index {i}: {type(node)}", style=STYLE["warning"])
+            console.print(f"{SYMBOLS['warning']} Skipping unknown node type at index {i}: {type(node)}", style=STYLE["warning"])
             completed_steps[0] += 1
             progress.update(chain_task, completed=completed_steps[0])
             return []
@@ -299,63 +323,203 @@ class Chain:
         writer.add_node_to_graph({**node_info, "index": i})
         return []
 
+    def _execute_parallel_steps(
+        self,
+        parallel_nodes: List[Union[Step, ApplyNode]],
+        current_records: List[Any],
+        writer: RunWriter,
+        step_index: int,
+        run_id: str,
+        progress: Progress,
+        chain_task: int,
+        completed_steps: List[int]
+    ) -> List[Dict[str, Any]]:
+        """Executes a list of Step or ApplyNode objects in parallel on the same input records.
+        The output for each input record is a dictionary of {node_id: output}.
+        """
+        console = Console()
+        if not current_records:
+            console.print(f"{SYMBOLS['warning']}Skipping Parallel Steps block at index {step_index} - empty input", style=STYLE["warning"])
+            completed_steps[0] += 1
+            progress.update(chain_task, completed=completed_steps[0])
+            return []
+
+        all_outputs_for_block = []
+
+        parallel_block_id = f"parallel_steps_{step_index}"
+        writer.add_node_to_graph({
+            "id": parallel_block_id,
+            "name": f"Parallel Steps Block {step_index + 1}",
+            "type": "parallel_steps_block",
+            "emoji": SYMBOLS["step"] + SYMBOLS["step"],
+            "index": step_index,
+            "children_ids": [n.id for n in parallel_nodes]
+        })
+
+        for record_idx, record in enumerate(current_records):
+            record_output_dict = {}
+            for node_idx, p_node in enumerate(parallel_nodes):
+                node_specific_input = [record]
+                node_output = None
+                node_info = {
+                    "id": p_node.id,
+                    "name": p_node.name,
+                    "type": "step" if isinstance(p_node, Step) else "apply",
+                    "emoji": getattr(p_node, 'emoji', SYMBOLS["step"] if isinstance(p_node, Step) else SYMBOLS["apply"]),
+                    "parent_block": parallel_block_id
+                }
+
+                try:
+                    if isinstance(p_node, Step):
+                        node_output_list = p_node.run(node_specific_input, run_id=run_id, step_index=step_index)
+                        node_info["signature"] = p_node.signature()
+                    elif isinstance(p_node, ApplyNode):
+                        node_output_list = p_node.run(node_specific_input)
+                    
+                    if node_output_list:
+                        node_output = node_output_list[0]
+                        record_output_dict[p_node.id] = node_output.model_dump(mode='json') if isinstance(node_output, BaseModel) else node_output
+                    else:
+                        record_output_dict[p_node.id] = None
+                        console.print(f"{SYMBOLS['warning']}Node {p_node.id} in parallel block returned no output for record {record_idx}", style=STYLE["warning"])
+
+                except Exception as e:
+                    console.print(f"{SYMBOLS['error']}Error in parallel node '{p_node.name}' (id: {p_node.id}) at step {step_index + 1}: {e}", style=STYLE["error"])
+                    record_output_dict[p_node.id] = {"error": str(e)}
+            
+            all_outputs_for_block.append(record_output_dict)
+
+        completed_steps[0] += 1
+        progress.update(chain_task, completed=completed_steps[0])
+        
+        return all_outputs_for_block
+
     def _execute_branches(self, branches: List[Branch], current_records: List[Any], 
                          writer: RunWriter, i: int, run_id: str, 
-                         progress: Progress, chain_task: int, completed_steps: List[int]) -> None:
-        """Execute a list of branches in parallel."""
+                         progress: Progress, chain_task: int, completed_steps: List[int]) -> List[Dict[str, Any]]:
+        """Execute a list of branches in parallel.
+        The output for each input record is a dictionary of {branch_name: final_branch_output}.
+        Returns a list of these dictionaries.
+        """
         console = Console()
-        branch_outputs = {}
-        num_branches = len(branches)
+        aggregated_branch_outputs_per_record = [{} for _ in range(len(current_records))]
+
+        if not current_records:
+            console.print(f"{SYMBOLS['warning']}Skipping Parallel Branches block at index {i} - empty input", style=STYLE["warning"])
+            num_steps_in_block = 0
+            for br in branches:
+                num_steps_in_block = max(num_steps_in_block, len(br.steps))
+            completed_steps[0] += num_steps_in_block if num_steps_in_block > 0 else 1
+            progress.update(chain_task, completed=completed_steps[0])
+            return []
+
+        branch_block_id = f"parallel_branches_{i}"
+        writer.add_node_to_graph({
+            "id": branch_block_id,
+            "name": f"Parallel Branches Block {i + 1}",
+            "type": "parallel_branches_block",
+            "emoji": SYMBOLS["branch"] + SYMBOLS["branch"],
+            "index": i,
+            "children_ids": [br.name for br in branches]
+        })
         
+        max_steps_in_any_branch = 0
+
         for br_idx, br in enumerate(branches):
             if not isinstance(br, Branch):
-                raise TypeError(f"Lists in Chain.steps must contain Branch objects (found {type(br)})")
+                raise TypeError(f"Lists in Chain.steps must contain Branch objects (found {type(br)}) at step {i+1}")
 
-            br_records = list(current_records)  # Give each branch a copy of input
+            branch_input_records = [dict(r) if isinstance(r, BaseModel) else dict(r) for r in current_records]
+
             num_sub_steps = len(br.steps)
+            max_steps_in_any_branch = max(max_steps_in_any_branch, num_sub_steps)
 
-            for j, sub in enumerate(br.steps):
-                sub_step_label = f"Step {i+1}.{br_idx+1}.{j+1}"
-                sub_node_name = f"'{sub.name}'" if hasattr(sub, 'name') and sub.name else f"({sub.id})"
-                branch_progress_desc = f"Step {i+1}/{len(self.steps)}: Branch [u]{br.name}[/u] ({br_idx+1}/{num_branches}) → {sub_step_label} {sub_node_name}"
+            writer.add_node_to_graph({
+                "id": br.name,
+                "name": br.name,
+                "type": "branch",
+                "emoji": getattr(br, 'emoji', SYMBOLS["branch"]),
+                "parent_block": branch_block_id,
+                "index": i,
+                "branch_index": br_idx
+            })
+
+            current_branch_records = branch_input_records
+
+            for sub_step_idx, sub_node in enumerate(br.steps):
+                sub_step_label = f"Step {i+1}.{br_idx+1}.{sub_step_idx+1}"
+                sub_node_name = f"'{sub_node.name}'" if hasattr(sub_node, 'name') and sub_node.name else f"({sub_node.id})"
+                branch_progress_desc = (
+                    f"Step {i+1}/{len(self.steps)}: Branch [u]{br.name}[/u] ({br_idx+1}/{len(branches)}) "
+                    f"→ {sub_step_label} {sub_node_name}"
+                )
                 progress.update(chain_task, description=branch_progress_desc)
 
-                if isinstance(sub, Step):
-                    try:
-                        br_step_outputs = sub.run(br_records, run_id=run_id, step_index=i)
-                    except Exception as e:
-                        console.print(f"{SYMBOLS['error']}Error in Branch '{br.name}', Step '{sub.name}': {e}", style=STYLE["error"])
-                        raise
-                    writer.write_step(f"{br.name}.{sub.id}", br_step_outputs)
-                    writer.add_node_to_graph({
-                        "id": f"{br.name}.{sub.id}", "name": sub.name, "type": "step",
-                        "branch": br.name, "signature": sub.signature(),
-                    })
-                    br_records = br_step_outputs
-                    completed_steps[0] += 1
-                    progress.update(chain_task, completed=completed_steps[0])
+                node_outputs_for_branch_step = []
+                try:
+                    if isinstance(sub_node, Step):
+                        node_outputs_for_branch_step = sub_node.run(current_branch_records, run_id=run_id, step_index=f"{i}.{br_idx}.{sub_step_idx}")
+                        writer.add_node_to_graph({
+                            "id": f"{br.name}.{sub_node.id}", "name": sub_node.name, "type": "step",
+                            "branch": br.name, "signature": sub_node.signature(), "index": f"{i}.{br_idx}.{sub_step_idx}"
+                        })
+                    elif isinstance(sub_node, ApplyNode):
+                        node_outputs_for_branch_step = sub_node.run(current_branch_records)
+                        writer.add_node_to_graph({
+                            "id": f"{br.name}.{sub_node.id}", "name": sub_node.name, "type": "apply",
+                            "branch": br.name, "index": f"{i}.{br_idx}.{sub_step_idx}"
+                        })
+                    else:
+                        raise TypeError(f"Unsupported node type {type(sub_node)} inside branch '{br.name}'")
+                except Exception as e:
+                    console.print(f"{SYMBOLS['error']}Error in Branch '{br.name}', Node '{getattr(sub_node, 'name', sub_node.id)}': {e}", style=STYLE["error"])
+                    for record_agg_dict in aggregated_branch_outputs_per_record:
+                        record_agg_dict[br.name] = {"error": f"Error in {sub_node.id}: {e}"}
+                    current_branch_records = []
+                    break
 
-                elif isinstance(sub, ApplyNode):
-                    try:
-                        br_apply_outputs = sub.run(br_records)
-                    except Exception as e:
-                        console.print(f"{SYMBOLS['error']}Error in Branch '{br.name}', Apply '{sub.name}': {e}", style=STYLE["error"])
-                        raise
-                    writer.write_step(f"{br.name}.{sub.id}", br_apply_outputs)
-                    writer.add_node_to_graph({
-                        "id": f"{br.name}.{sub.id}", "name": sub.name, "type": "apply",
-                        "branch": br.name,
-                    })
-                    br_records = br_apply_outputs
-                    completed_steps[0] += 1
-                    progress.update(chain_task, completed=completed_steps[0])
+                writer.write_step(f"{br.name}.{sub_node.id}", node_outputs_for_branch_step)
+                current_branch_records = node_outputs_for_branch_step
 
-                else:
-                    raise TypeError(f"Unsupported node {type(sub)} inside branch '{br.name}'")
+                if not current_branch_records:
+                    console.print(f"{SYMBOLS['warning']}Branch '{br.name}', Node '{getattr(sub_node, 'name', sub_node.id)}' produced no output. Branch processing may halt or produce empty results.", style=STYLE["warning"])
+                    break
 
-            branch_outputs[br.name] = br_records
-                
-        progress.update(chain_task, description=f"Step {i+1}/{len(self.steps)}: Parallel branches completed")
+                completed_steps[0] += 1
+                progress.update(chain_task, completed=completed_steps[0])
+            
+            for record_idx, final_branch_output_for_record in enumerate(current_branch_records):
+                if record_idx < len(aggregated_branch_outputs_per_record):
+                    aggregated_branch_outputs_per_record[record_idx][br.name] = (
+                        final_branch_output_for_record.model_dump(mode='json')
+                        if isinstance(final_branch_output_for_record, BaseModel)
+                        else final_branch_output_for_record
+                    )
+            for record_idx in range(len(current_branch_records), len(aggregated_branch_outputs_per_record)):
+                 if br.name not in aggregated_branch_outputs_per_record[record_idx]:
+                    aggregated_branch_outputs_per_record[record_idx][br.name] = None
+
+        progress.update(chain_task, description=f"Step {i+1}/{len(self.steps)}: Parallel branches aggregated")
+
+        return aggregated_branch_outputs_per_record
+    
+    def _count_steps_in_node(self, node: Any) -> int:
+        """Helper to count effective steps for progress in case of error/skip for a complex node."""
+        if isinstance(node, (Step, ApplyNode)):
+            return 1
+        elif isinstance(node, Branch):
+            return len(node.steps) if node.steps else 1
+        elif isinstance(node, list):
+            is_parallel_steps = all(isinstance(n, (Step, ApplyNode)) for n in node)
+            if is_parallel_steps:
+                return 1
+            else:
+                max_branch_len = 0
+                for br_node in node:
+                    if isinstance(br_node, Branch):
+                        max_branch_len = max(max_branch_len, len(br_node.steps) if br_node.steps else 1)
+                return max_branch_len if max_branch_len > 0 else 1
+        return 1
 
     # ------------------------------------------------------------------ #
 
@@ -436,15 +600,20 @@ class Chain:
                 
                 # Process outputs if any
                 if isinstance(node, list):
-                    # For branch lists, we've already handled everything in execute_node
-                    continue
+                    current_records = step_outputs
+                    is_parallel_steps_type = all(isinstance(n, (Step, ApplyNode)) for n in node) if node else False
+                    block_id = f"parallel_steps_output_{i}" if is_parallel_steps_type else f"parallel_branches_output_{i}"
+                    if current_records:
+                         writer.write_step(block_id, current_records)
                     
-                if step_outputs:
-                    writer.write_step(node.id if hasattr(node, 'id') else node.name, step_outputs)
+                elif step_outputs:
+                    node_id_for_writer = node.id if hasattr(node, 'id') and node.id else \
+                                       (node.name if hasattr(node, 'name') and node.name else f"unknown_node_{i}")
+                    writer.write_step(node_id_for_writer, step_outputs)
                     current_records = step_outputs
                 else:
                     if isinstance(node, (Step, ApplyNode)):
-                        console.print(f"{SYMBOLS['warning']} Node {i} ('{node.name}') produced None/empty output.", style=STYLE["warning"])
+                        console.print(f"{SYMBOLS['warning']} Node {i+1} ('{getattr(node, 'name', 'Unnamed')}') produced None/empty output.", style=STYLE["warning"])
                     current_records = []
                     
                 if not current_records and i < len(self.steps) - 1:
@@ -452,7 +621,6 @@ class Chain:
                     progress.update(chain_task, completed=total_steps, description="Chain stopped early.")
                     break
 
-            # Mark complete at the end
             progress.update(chain_task, description="Chain completed.", completed=total_steps)
 
         console.print(f"\n{SYMBOLS['chain']}Finalizing output...", style=STYLE["info"])
