@@ -41,25 +41,25 @@ class ReasonedAnswer(BaseModel):
 # Engine Registration
 register_engine(
     name="qwen2.5_32b_instruct",
-    model="/lustre/fsn1/projects/rech/rua/uvb79kr/Qwen--Qwen2.5-32B-Instruct",
+    model="/lustre/fsn1/projects/rech/rua/uvb79kr/meta-llama--Llama-3.3-70B-Instruct",
     dtype="bfloat16",
     gpu_memory_utilization=0.9,
     enable_reasoning=False,
-    lazy=False,
-    max_model_len=12338,
-    devices=[0],
+    lazy=True,
+    max_model_len=16384,
+    devices=[0,1,2,3,4,5,6,7],
 )
 
 register_engine(
     name="qwen3_30b_a3b_reasoning",
-    model="/lustre/fsn1/projects/rech/rua/uvb79kr/Qwen--Qwen3-30B-A3B",
+    model="/lustre/fsn1/projects/rech/rua/uvb79kr/deepseek-ai--DeepSeek-R1-Distill-Llama-70B",
     dtype="bfloat16",
     gpu_memory_utilization=0.9,
     enable_reasoning=True,
     reasoning_parser="deepseek_r1",
-    lazy=False,
-    max_model_len=8192,
-    devices=[1],
+    lazy=True,
+    max_model_len=16384,
+    devices=[0,1,2,3,4,5,6,7],
 )
 
 # Prompt Templates
