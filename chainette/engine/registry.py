@@ -1,25 +1,16 @@
 from __future__ import annotations
 
-"""chainette.engine.registry
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Central registry for *static* LLM engine configurations.
+"""Simple engine registry for Chainette.
 
-Public API
-==========
-* **`EngineConfig`** – validated data model for engine settings.
-* **`register_engine()`** – store or update an engine configuration.
-* **`get_engine_config()`** – fetch a configuration by name.
-* **`load_engines_from_yaml()`** – bulk‑load configurations from a YAML file.
-
-This module defines *configuration only*; actual server lifecycle
-(start / reuse / shutdown) is handled in :pymod:`chainette.engine.runtime`.
+Currently only supports vLLM engines, but is designed to be easily extended.
 """
 
+import asyncio  # Add this import
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, MutableMapping, Optional
+from typing import Any, Dict, Optional
 
-import yaml
-from pydantic import BaseModel, Field, PositiveFloat, field_validator
+from vllm import LLM
 
 __all__ = [
     "EngineConfig",
@@ -28,167 +19,131 @@ __all__ = [
     "load_engines_from_yaml",
 ]
 
-# ---------------------------------------------------------------------------
-# Pydantic model
-# ---------------------------------------------------------------------------
+
+_REGISTRY: Dict[str, "EngineConfig"] = {}
 
 
-class EngineConfig(BaseModel):
-    """Validated static description of an LLM back‑end.
+def _is_vllm_model(model: str) -> bool:
+    """Very naive detection whether *model* should be loaded with vLLM."""
+    return True  # For now we assume everything is vLLM – keeps the code tiny.
 
-    Only fields that *actually affect* the vLLM command line (or future
-    back‑ends) are included.  Simplicity is paramount.
-    """
 
-    name: str = Field(..., description="Unique identifier to reference this engine")
-    model: str = Field(..., description="Model name or HF repository path")
+@dataclass
+class EngineConfig:  # noqa: D101 – self-documenting via fields
+    name: str
+    model: str
+    dtype: Optional[str] = None
+    gpu_memory_utilization: Optional[float] = None
+    max_model_len: Optional[int] = None
+    tensor_parallel_size: Optional[int] = None
 
-    # Hardware / memory tuning ------------------------------------------------
-    dtype: str = Field("auto", description="torch dtype string accepted by vLLM")
-    gpu_memory_utilization: PositiveFloat = Field(
-        0.9, ge=0, le=1, description="Fraction of GPU RAM to allocate"
-    )
-    devices: List[int] = Field(
-        default_factory=lambda: [0],
-        description="CUDA device indices for this engine (tensor parallel if >1)",
-    )
-    max_model_len: Optional[int] = Field(
-        None, description="Maximum sequence length the model can handle"
-    )
-
-    # Reasoning & other toggles ----------------------------------------------
+    # Reasoning
     enable_reasoning: bool = False
     reasoning_parser: Optional[str] = None
-    lazy: bool = False  # defer spawn until first use
 
-    extra: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="Backend‑specific kwargs passed verbatim to the Engine",
-    )
+    # Additional, engine-specific kwargs
+    extra: Dict[str, Any] = field(default_factory=dict)
 
-    # ---------------------------------------------------------------------
-    # derived / validated fields
-    # ---------------------------------------------------------------------
+    # Internal cache for the instantiated engine object
+    _engine: Optional[LLM] = field(init=False, default=None, repr=False)
 
-    @field_validator("reasoning_parser")
-    @classmethod
-    def check_reasoning_parser(cls, v, values):  # noqa: ANN001,N805
-        if v is not None and values.data.get("enable_reasoning") is False:
-            raise ValueError("reasoning_parser set but enable_reasoning is False")
-        return v
+    # -------------------------------------------------- #
+    # Public helpers
+    # -------------------------------------------------- #
 
-    def cfg_hash(self) -> str:
-        """Deterministic hash used to detect restart needs.
+    @property
+    def engine(self):
+        """Return the instantiated engine (lazy-loaded once)."""
+        if self._engine is None:
+            if _is_vllm_model(self.model):
+                self._engine = self._create_vllm_engine()
+            else:
+                raise ValueError("Only vLLM engines are supported at the moment.")
+        return self._engine
 
-        We ignore *name* because you can re‑register the same engine under a
-        different name without forcing a restart.
-        """
+    def release_engine(self):
+        """Release the cached engine instance to free resources."""
+        if self._engine is not None:
+            engine_to_release = self._engine
+            self._engine = None  # Remove reference from this config object.
 
-        import hashlib, json  # local import keeps global namespace tidy
+            # Try to explicitly shut down the vLLM engine's components
+            if hasattr(engine_to_release, 'llm_engine'):
+                if hasattr(engine_to_release.llm_engine, 'model_executor'):
+                    del engine_to_release.llm_engine.model_executor
+                del engine_to_release.llm_engine
+            
+            del engine_to_release
+        else:
+            pass # No active engine instance to release
 
-        payload = {
-            k: getattr(self, k)
-            for k in (
-                "model",
-                "dtype",
-                "gpu_memory_utilization",
-                "devices",
-                "enable_reasoning",
-                "reasoning_parser",
-                "extra",
-            )
+    # -------------------------------------------------- #
+    # Private helpers
+    # -------------------------------------------------- #
+
+    def _create_vllm_engine(self):
+        """Instantiate a vLLM LLM object from this config."""
+        kwargs: Dict[str, Any] = {
+            "model": self.model,
         }
-        return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+        if self.dtype:
+            kwargs["dtype"] = self.dtype
+        if self.gpu_memory_utilization is not None:
+            kwargs["gpu_memory_utilization"] = self.gpu_memory_utilization
+        if self.max_model_len is not None:
+            kwargs["max_model_len"] = self.max_model_len
+        if self.tensor_parallel_size is not None:
+            kwargs["tensor_parallel_size"] = self.tensor_parallel_size
+        if self.enable_reasoning:
+            kwargs["enable_reasoning"] = True
+            if self.reasoning_parser:
+                kwargs["reasoning_parser"] = self.reasoning_parser
 
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, EngineConfig):
-            return NotImplemented
-        return (
-            self.name == other.name and
-            self.model == other.model and
-            sorted(self.devices) == sorted(other.devices) and
-            self.lazy == other.lazy and
-            self.dtype == other.dtype and
-            self.max_model_len == other.max_model_len and
-            self.gpu_memory_utilization == other.gpu_memory_utilization and
-            self.enable_reasoning == other.enable_reasoning and
-            self.reasoning_parser == other.reasoning_parser and
-            self.extra == other.extra
-        )
+        # Merge in extra (last so callers can override anything)
+        kwargs.update(self.extra)
 
-    def __hash__(self) -> int:
-        return hash((
-            self.name,
-            self.model,
-            tuple(sorted(self.devices)),
-            self.lazy,
-            self.dtype,
-            self.max_model_len,
-            self.gpu_memory_utilization,
-            self.enable_reasoning,
-            self.reasoning_parser,
-            tuple(sorted(self.extra.items()))
-        ))
+        return LLM(**kwargs)
+
+    # -------------------------------------------------- #
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a JSON-serialisable representation (metadata only)."""
+        d = self.__dict__.copy()
+        d.pop("_engine", None)
+        return d
 
 
-# ---------------------------------------------------------------------------
-# Global registry
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------- #
+# Registry helpers
+# --------------------------------------------------------------------------- #
 
+def register_engine(name: str, **kwargs):  # noqa: D401 – simple factory
+    """Register a new engine configuration.
 
-_REGISTRY: MutableMapping[str, EngineConfig] = {}
-
-
-def register_engine(**kwargs: Any) -> EngineConfig:  # noqa: D401, ANN001
-    """Register or update an :class:`EngineConfig`.
-
-    Returns the validated config instance so the caller can re‑use it.
+    The keyword arguments map to :class:`EngineConfig` fields. Unknown keys are
+    stored in *extra* so we remain forward-compatible.
     """
+    known_fields = {f.name for f in EngineConfig.__dataclass_fields__.values()}  # type: ignore[arg-type]
+    cfg_kwargs = {k: v for k, v in kwargs.items() if k in known_fields}
+    extra = {k: v for k, v in kwargs.items() if k not in known_fields}
+    cfg_kwargs["extra"] = extra
+    cfg_kwargs["name"] = name
 
-    config = EngineConfig(**kwargs)
-    _REGISTRY[config.name] = config
-    return config
+    cfg = EngineConfig(**cfg_kwargs)
+    _REGISTRY[name] = cfg
+    return cfg
 
 
 def get_engine_config(name: str) -> EngineConfig:
-    """Fetch a config by name, raising `KeyError` if missing."""
-
-    try:
-        return _REGISTRY[name]
-    except KeyError as exc:  # re‑raise with nicer message
-        raise KeyError(f"Engine '{name}' is not registered. Did you call register_engine()?") from exc
+    if name not in _REGISTRY:
+        raise KeyError(f"Engine '{name}' is not registered.")
+    return _REGISTRY[name]
 
 
-# ---------------------------------------------------------------------------
-# YAML helper
-# ---------------------------------------------------------------------------
+def load_engines_from_yaml(path: str | bytes | Any):  # pragma: no cover – rarely used
+    """Load multiple engine configs from a YAML file."""
+    import yaml
 
-
-def load_engines_from_yaml(path: str | Path) -> List[EngineConfig]:
-    """Load multiple engine configs from a YAML file.
-
-    YAML schema:
-    ```yaml
-    engines:
-      - name: qwen_r1
-        model: deepseek‑ai/DeepSeek‑R1‑Distill‑Qwen‑7B
-        dtype: bfloat16
-        gpu_memory_utilization: 0.45
-        enable_reasoning: true
-        reasoning_parser: deepseek_r1
-        devices: [0, 1]
-        lazy: true
-    ```
-    """
-
-    path = Path(path)
-    data = yaml.safe_load(path.read_text())
-
-    if not data or "engines" not in data:
-        raise ValueError("YAML file must contain a top‑level 'engines' key")
-
-    configs: List[EngineConfig] = []
-    for raw in data["engines"]:
-        cfg = register_engine(**raw)
-        configs.append(cfg)
-    return configs
+    data = yaml.safe_load(Path(path).read_text())  # type: ignore[arg-type]
+    for item in data:
+        register_engine(**item)

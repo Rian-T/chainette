@@ -30,6 +30,7 @@ class RunWriter:  # noqa: D101
         self._splits: dict[str, list[dict[str, Any]]] = {}
         self._exec_graph: list[dict[str, Any]] = []
         self._chain_name: str = ""
+        self._file_counters: dict[str, int] = {}  # Track file numbers for each split
 
     # -------------------------------------------------------------- #
 

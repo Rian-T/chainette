@@ -1,364 +1,262 @@
 from __future__ import annotations
 
-"""chainette.cli
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Minimal Typer CLI exposing warmup, run, kill commands.
-"""
+"""Chainette Command Line Interface."""
 
-import importlib
+import importlib.util
 import json
 from pathlib import Path
-from typing import Optional, List, Type, Union, Dict, Any
+from typing import List, Any, Type
 
 import typer
 from rich.console import Console
 from rich.table import Table
-from rich.text import Text
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
-from rich.panel import Panel
 from pydantic import BaseModel
 
-from chainette.engine.registry import load_engines_from_yaml
-from chainette.engine.runtime import kill_all_engines, kill_engine, spawn_engine
-from chainette.utils.constants import SYMBOLS, STYLE
+from chainette import Chain, Step, ApplyNode, Branch, Node # Assuming __all__ is well-defined
+from chainette.engine.registry import _REGISTRY as ENGINE_REGISTRY, EngineConfig, get_engine_config # Accessing internal for simplicity
 
-app = typer.Typer(add_completion=False, help="Chainette command‑line interface")
+app = typer.Typer(
+    name="chainette",
+    help="CLI for Chainette: typed, lightweight LLM chaining.",
+    add_completion=False,
+)
 console = Console()
 
-# Import Step at runtime when needed to avoid circular imports
-Step = None
-Chain = None
-ApplyNode = None
-Branch = None
+
+def _load_chain_from_file(file_path: Path, chain_name: str) -> Chain:
+    """Dynamically load a Chain object from a Python file."""
+    if not file_path.exists():
+        console.print(f"[bold red]Error: File not found: {file_path}[/]")
+        raise typer.Exit(code=1)
+    
+    module_name = file_path.stem
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+    if spec is None or spec.loader is None:
+        console.print(f"[bold red]Error: Could not load module from {file_path}[/]")
+        raise typer.Exit(code=1)
+    
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as e:
+        console.print(f"[bold red]Error executing Python file {file_path}: {e}[/]")
+        raise typer.Exit(code=1)
+
+    if not hasattr(module, chain_name):
+        console.print(f"[bold red]Error: Chain '{chain_name}' not found in {file_path}[/]")
+        raise typer.Exit(code=1)
+    
+    chain_obj = getattr(module, chain_name)
+    if not isinstance(chain_obj, Chain):
+        console.print(f"[bold red]Error: Object '{chain_name}' in {file_path} is not a Chainette Chain.[/]")
+        raise typer.Exit(code=1)
+    return chain_obj
 
 @app.command()
-def warmup(
-    engines_file: Path = typer.Option(..., "-f", help="YAML file with engine configs"),
-    engines: Optional[str] = typer.Option(None, "-e", help="Comma‑separated engine names"),
-):
-    """Start non‑lazy engines so they are ready for `run`."""
+def engines():
+    """List all registered LLM engine configurations."""
+    if not ENGINE_REGISTRY:
+        console.print("[yellow]No engines registered.[/]")
+        return
 
-    cfgs = load_engines_from_yaml(engines_file)
-    names = set(engines.split(",")) if engines else {c.name for c in cfgs}
+    table = Table(title="Registered LLM Engines", box=typer.rich_help_panel.box.ROUNDED)
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Model Path/ID", style="magenta")
+    table.add_column("Dtype", style="green")
+    table.add_column("TP Size", style="yellow")
+    table.add_column("Max Len", style="blue")
+    table.add_column("GPU Util", style="red")
+    table.add_column("Reasoning", style="dim")
 
-    console.print(f"\n{SYMBOLS['chain']}Starting engines...", style=STYLE["info"])
-
-    table = Table(show_header=False, box=None, pad_edge=False, padding=(0, 1))
-    table.add_column(style=STYLE["success"])
-    table.add_column(style="bold " + STYLE["info"])
-
-    for cfg in cfgs:
-        if cfg.name in names and not cfg.lazy:
-            live = spawn_engine(cfg)
-            table.add_row(SYMBOLS['success'], f"{cfg.name} listening on port {live.port}")
-
+    for name, config in ENGINE_REGISTRY.items():
+        reasoning_status = (
+            f"{config.reasoning_parser} (enabled)" 
+            if config.enable_reasoning and config.reasoning_parser 
+            else "enabled" if config.enable_reasoning 
+            else "disabled"
+        )
+        table.add_row(
+            name,
+            config.model,
+            str(config.dtype or "-"),
+            str(config.tensor_parallel_size or "-"),
+            str(config.max_model_len or "-"),
+            str(config.gpu_memory_utilization or "-"),
+            reasoning_status,
+        )
     console.print(table)
 
+# Placeholder for inspect and run commands to be added later
+@app.command()
+def inspect(
+    chain_file: Path = typer.Argument(..., help="Path to the Python file containing the chain definition.", exists=True, file_okay=True, dir_okay=False, readable=True),
+    chain_name: str = typer.Argument(..., help="Name of the chain variable in the file.")
+):
+    """Inspect a chain for model compatibility between steps (basic)."""
+    console.print(f"[cyan]Inspecting chain '{chain_name}' from {chain_file}...[/]")
+    chain_obj = _load_chain_from_file(chain_file, chain_name)
+    
+    # Simplified inspection logic for now
+    # This needs to be significantly more robust for real use
+    # For now, we'll just list steps and their declared I/O models
+    console.print(f"Chain: [bold]{chain_obj.name}[/] ({len(chain_obj.steps)} top-level nodes)")
+
+    issues_found = 0
+
+    def get_node_io_types(node: Node, prev_output_type: Type[BaseModel] | None) -> tuple[Type[BaseModel] | None, Type[BaseModel] | None, bool]:
+        is_compatible = True
+        current_input_type = None
+        current_output_type = None
+
+        if isinstance(node, Step):
+            current_input_type = node.input_model
+            current_output_type = node.output_model
+            if prev_output_type and prev_output_type != current_input_type:
+                is_compatible = False
+        elif isinstance(node, ApplyNode):
+            # Check if we have type information in the ApplyNode
+            if hasattr(node, 'input_model') and node.input_model:
+                current_input_type = node.input_model
+                # Compare with previous step's output
+                if prev_output_type and prev_output_type != current_input_type:
+                    is_compatible = False
+            else:
+                # If no input_model specified, assume it can accept previous output
+                current_input_type = prev_output_type
+
+            if hasattr(node, 'output_model') and node.output_model:
+                current_output_type = node.output_model
+            else:
+                # Without explicit output_model, we can't determine
+                current_output_type = Any
+                console.print(f"  [yellow]Warning:[/] ApplyNode '{node.name}' output model type not specified. Assuming compatible.")
+        elif isinstance(node, Branch):
+            # For a branch, its steps run on the same input as the branch received.
+            # The output of the branch is the output of its last step.
+            branch_prev_output = prev_output_type
+            for sub_node_idx, sub_node in enumerate(node.steps):
+                _, branch_prev_output, _ = get_node_io_types(sub_node, branch_prev_output)
+            current_input_type = prev_output_type # Branch takes input from previous step
+            current_output_type = branch_prev_output
+            # Compatibility check for branch itself relies on its internal steps
+
+        return current_input_type, current_output_type, is_compatible
+
+    previous_node_output_type: Type[BaseModel] | None = None # Input to the very first step
+
+    for i, node_or_branch_list in enumerate(chain_obj.steps):
+        if isinstance(node_or_branch_list, list): # It's a list of branches
+            console.print(f"Node {i+1}: Parallel Branches ({len(node_or_branch_list)})")
+            for branch_idx, branch_node in enumerate(node_or_branch_list):
+                console.print(f"  Branch {branch_idx + 1}: '{branch_node.name}'")
+                branch_input_type = previous_node_output_type # Each branch gets same input
+                branch_output_type_final = branch_input_type
+                for sub_i, sub_node in enumerate(branch_node.steps):
+                    sub_node_input_type, sub_node_output_type, compatible = get_node_io_types(sub_node, branch_output_type_final)
+                    type_info = f"{sub_node_input_type.__name__ if sub_node_input_type else 'Dynamic'} -> {sub_node_output_type.__name__ if sub_node_output_type else 'Dynamic'}"
+                    status = "[green]OK[/]" if compatible else "[bold red]MISMATCH[/]"
+                    if not compatible: issues_found += 1
+                    console.print(f"    Step {sub_i+1} ('{sub_node.name}' - {type(sub_node).__name__}): {type_info} - {status}")
+                    branch_output_type_final = sub_node_output_type
+            # Output of parallel branches is not fed back to main chain in this design.
+        elif isinstance(node_or_branch_list, Node):
+            node = node_or_branch_list
+            node_input_type, node_output_type, compatible = get_node_io_types(node, previous_node_output_type)
+            
+            type_info = f"{node_input_type.__name__ if node_input_type else 'Dynamic'} -> {node_output_type.__name__ if node_output_type else 'Dynamic'}"
+            status = "[green]OK[/]" if compatible else "[bold red]MISMATCH[/]"
+            if not compatible: issues_found +=1
+
+            console.print(f"Node {i+1} ('{node.name}' - {type(node).__name__}): {type_info} - {status}")
+            previous_node_output_type = node_output_type
+        else:
+            console.print(f"[red]Unknown node type at step {i+1}[/]")
+            issues_found += 1
+
+    if issues_found == 0:
+        console.print("[bold green]Chain inspection passed. All declared Step I/O models are compatible.[/]")
+    else:
+        console.print(f"[bold red]Chain inspection failed. Found {issues_found} potential I/O model mismatch(es).[/]")
+        raise typer.Exit(code=1)
 
 @app.command()
 def run(
-    chain_path: str = typer.Argument(..., help="python_path:obj e.g. examples.qa:my_chain"),
-    input_file: Path = typer.Option(..., "-i", exists=True),
-    output_dir: Path = typer.Option(..., "--output_dir", file_okay=False),
-    max_lines_per_file: int = typer.Option(1000, "--max_lines_per_file"),
-    fmt: str = typer.Option("jsonl", "--format", help="jsonl or csv"),
-    engines_file: Optional[Path] = typer.Option(None, "-f"),
-    engines: Optional[str] = typer.Option(None, "-e"),
-):  # noqa: WPS231
-    """Load a Chain object and execute it."""
-
-    # Import Step here to avoid circular imports
-    global Step
-    if Step is None:
-        from chainette.core.step import Step
-
-    # dynamic import ---------------------------------------------------------
-    module_path, obj_name = chain_path.split(":")
-    mod = importlib.import_module(module_path)
-    chain = getattr(mod, obj_name)
-
-    from datasets import Dataset
-
-    # read inputs ------------------------------------------------------------
-    with console.status("Loading input data..."):
-        inputs_ds = Dataset.from_json(input_file)
-        first_step = next((s for s in chain.steps if isinstance(s, Step)), None)
-        if not first_step:
-            console.print(f"{SYMBOLS['error']}Chain does not contain any executable Step.", style=STYLE['error'])
-            raise typer.Exit(code=1)
-        if not first_step.input_model:
-            console.print(f"{SYMBOLS['error']}First Step '{first_step.name}' has no input_model defined.", style=STYLE['error'])
-            raise typer.Exit(code=1)
-
-        try:
-            inputs = [first_step.input_model.model_validate(row) for row in inputs_ds]
-        except Exception as e:
-            console.print(f"{SYMBOLS['error']}Failed to validate input data against first step's model ({first_step.input_model.__name__}): {e}", style=STYLE['error'])
-            raise typer.Exit(code=1)
-
-    # load engines -----------------------------------------------------------
-    cfgs = load_engines_from_yaml(engines_file) if engines_file else []
-    _ = engines  # currently ignored; configs already in registry
-
-    # execute ---------------------------------------------------------------
-    ds_dict = chain.run(
-        inputs,
-        output_dir=output_dir,
-        max_lines_per_file=max_lines_per_file,
-        fmt=fmt
-    )
-
-    from chainette.io.writer import flatten_datasetdict
-
-    # Display output summary
-    flat = flatten_datasetdict(ds_dict)
-    if flat and len(flat) > 0:
-        console.print("\n[bold dim]Sample output (first record):[/bold dim]", style=STYLE["dim"])
-        sample = flat[0]
-        if isinstance(sample, dict):
-            sample_table = Table(show_header=True, header_style="bold " + STYLE["info"], box=None, padding=(0, 1))
-            sample_table.add_column("Key", style=STYLE["info"])
-            sample_table.add_column("Value", style="white")
-
-            for i, (key, value) in enumerate(sample.items()):
-                if i >= 5:
-                    sample_table.add_row("...", "...")
-                    break
-                sample_table.add_row(key, str(value)[:80])
-
-            console.print(sample_table)
-
-
-@app.command()
-def kill(
-    engine: Optional[str] = typer.Option(None, "-e", help="Engine name"),
-    all_: bool = typer.Option(False, "--all", help="Kill all"),
+    chain_file: Path = typer.Argument(..., help="Path to the Python file containing the chain definition.", exists=True, file_okay=True, dir_okay=False, readable=True),
+    chain_name: str = typer.Argument(..., help="Name of the chain variable in the file."),
+    input_file: Path = typer.Argument(..., help="Path to the input JSONL file (each line is a Pydantic model for the first step).", exists=True, file_okay=True, dir_okay=False, readable=True),
+    output_dir: Path = typer.Argument(..., help="Directory to save the output datasets.", file_okay=False, dir_okay=True, writable=True, resolve_path=True),
+    generate_flattened: bool = typer.Option(True, "--flattened/--no-flattened", help="Generate a single flattened output file."),
+    max_lines_per_file: int = typer.Option(1000, help="Maximum lines per output data file.")
 ):
-    """Stop one or all engines."""
+    """Run a chain with inputs from a JSONL file and save results."""
+    console.print(f"[cyan]Running chain '{chain_name}' from {chain_file}...[/]")
+    chain_obj = _load_chain_from_file(chain_file, chain_name)
 
-    if all_:
-        with console.status("Terminating all engines..."):
-            kill_all_engines()
-        console.print(f"{SYMBOLS['success']}All engines terminated", style=STYLE["warning"])
-    elif engine:
-        with console.status(f"Terminating engine '{engine}'..."):
-            kill_engine(engine)
-        console.print(f"{SYMBOLS['success']}{engine} terminated", style=STYLE["warning"])
-    else:
-        console.print(f"{SYMBOLS['error']}Specify -e or --all", style=STYLE["error"])
+    # Determine the input model type for the first step of the chain
+    first_node = None
+    if chain_obj.steps:
+        if isinstance(chain_obj.steps[0], list): # Parallel branches first
+            if chain_obj.steps[0] and chain_obj.steps[0][0].steps:
+                 first_node = chain_obj.steps[0][0].steps[0]
+        elif isinstance(chain_obj.steps[0], Node):
+            first_node = chain_obj.steps[0]
+    
+    input_model_type: Type[BaseModel] | None = None
+    if isinstance(first_node, Step):
+        input_model_type = first_node.input_model
+    elif isinstance(first_node, ApplyNode):
+        # Cannot easily infer input type for ApplyNode, user must ensure input file matches
+        console.print("[yellow]Warning: First step is an ApplyNode. Cannot determine expected input model type automatically. Ensure input file format is correct.[/]")
+    elif isinstance(first_node, Branch):
+         if first_node.steps and isinstance(first_node.steps[0], Step):
+             input_model_type = first_node.steps[0].input_model
 
+    if not input_model_type:
+        console.print("[bold red]Error: Could not determine the input model type for the chain's first step. Ensure the first step is a Step or a Branch starting with a Step.[/]")
+        raise typer.Exit(code=1)
 
-@app.command()
-def inspect(
-    chain_path: str = typer.Argument(..., help="python_path:obj e.g. examples.qa:my_chain"),
-):
-    """Inspect and validate a Chain without running it."""
-    global Step, Chain, ApplyNode, Branch
-    if Step is None: from chainette.core.step import Step
-    if Chain is None: from chainette.core.chain import Chain
-    if ApplyNode is None: from chainette.core.apply import ApplyNode
-    if Branch is None: from chainette.core.branch import Branch
+    # Load inputs
+    inputs_data: List[BaseModel] = []
+    try:
+        with open(input_file, "r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f, 1):
+                if line.strip():
+                    try:
+                        data = json.loads(line)
+                        inputs_data.append(input_model_type.model_validate(data))
+                    except json.JSONDecodeError as e:
+                        console.print(f"[bold red]Error decoding JSON on line {line_num} in {input_file}: {e}[/]")
+                        raise typer.Exit(code=1)
+                    except Exception as e: # Includes Pydantic validation errors
+                        console.print(f"[bold red]Error parsing/validating line {line_num} in {input_file} for model {input_model_type.__name__}: {e}[/]")
+                        raise typer.Exit(code=1)
+        console.print(f"Loaded {len(inputs_data)} input records from {input_file}.")
+    except Exception as e:
+        console.print(f"[bold red]Error reading input file {input_file}: {e}[/]")
+        raise typer.Exit(code=1)
+
+    if not inputs_data:
+        console.print("[yellow]Warning: Input file is empty or contains no valid data. Nothing to run.[/]")
+        return
+
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        module_path, obj_name = chain_path.split(":")
-        mod = importlib.import_module(module_path)
-        chain_obj = getattr(mod, obj_name)
-    except (ValueError, ImportError, AttributeError) as e:
-        console.print(f"{SYMBOLS['error']}Failed to import chain from '{chain_path}': {e}", style=STYLE["error"])
+        console.print(f"Executing chain. Output will be saved to: {output_dir}")
+        chain_obj.run(
+            inputs=inputs_data,
+            output_dir=output_dir,
+            fmt="jsonl", # Currently hardcoded, could be an option
+            generate_flattened_output=generate_flattened,
+            max_lines_per_file=max_lines_per_file
+        )
+        console.print("[bold green]Chain execution finished successfully![/]")
+        console.print(f"Results written to {output_dir}")
+    except Exception as e:
+        console.print(f"[bold red]Error during chain execution: {e}[/]")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
         raise typer.Exit(code=1)
-
-    if not isinstance(chain_obj, Chain):
-        console.print(f"{SYMBOLS['error']}Object '{obj_name}' is not a Chain instance", style=STYLE["error"])
-        raise typer.Exit(code=1)
-
-    console.print(f"\n{SYMBOLS['chain']}Inspecting chain: [bold]{chain_obj.name}[/bold]", style=STYLE["info"])
-    summary_tree = chain_obj._build_execution_plan_tree()
-    console.print(Panel(summary_tree, border_style=STYLE["info"], expand=False))
-    
-    validation_issues = []
-
-    _perform_validation_for_sequence(
-        sequence_name=f"Main Chain: {chain_obj.name}",
-        nodes=chain_obj.steps,
-        input_to_sequence=None, # Will be derived from the first step of the chain
-        base_path_for_issues="", # Full path for issue reporting
-        console_obj=console,
-        validation_issues=validation_issues
-    )
-
-    if validation_issues:
-        console.print(f"\n{SYMBOLS['error']}Found {len(validation_issues)} validation issues across all contexts:", style=STYLE["error"])
-        for issue in validation_issues:
-            console.print(f"  • {issue}", style=STYLE["error"])
-    else:
-        console.print(f"\n{SYMBOLS['success']}Chain validation successful! All model connections appear compatible.", style=STYLE["success"])
-
-
-def _get_node_name_for_path(node_instance: Any, index: int) -> str:
-    """Helper to get a descriptive name for a node for path construction."""
-    if isinstance(node_instance, list):
-        if not node_instance: return "EmptyParallelBlock"
-        is_parallel_steps = all(isinstance(n, (Step, ApplyNode)) for n in node_instance)
-        return "ParallelSteps" if is_parallel_steps else "ParallelBranches"
-    return getattr(node_instance, 'name', None) or \
-           (getattr(node_instance, 'id', None) if isinstance(node_instance, (Step, ApplyNode)) else None) or \
-           f"Unnamed_{type(node_instance).__name__}"
-
-
-def _perform_validation_for_sequence(
-    sequence_name: str,
-    nodes: List[Any],
-    input_to_sequence: Optional[Type[BaseModel]],
-    base_path_for_issues: str, # Used for constructing full paths for the validation_issues list
-    console_obj: Console,
-    validation_issues: List[str]
-):
-    console_obj.print(f"\n{SYMBOLS['info']}Validating Sequence: [bold]{sequence_name}[/bold]", style=STYLE["info"])
-    
-    table = Table(show_header=True, header_style="bold " + STYLE["info"], title=sequence_name)
-    table.add_column("Node Path (Relative)", overflow="fold")
-    table.add_column("Input Model")
-    table.add_column("Output Model")
-    table.add_column("Status")
-    table.add_column("Details", overflow="fold")
-
-    class _DictOutputType(BaseModel): pass
-    _DictOutputType.__name__ = "Dict[str,Any]"
-
-    current_sequence_effective_input = input_to_sequence
-    if not current_sequence_effective_input and nodes: # Try to derive for the very first sequence (main chain)
-        first_node_in_chain = nodes[0]
-        if isinstance(first_node_in_chain, Step):
-            current_sequence_effective_input = first_node_in_chain.input_model
-        elif isinstance(first_node_in_chain, list) and first_node_in_chain: # Parallel block starts
-            first_item_in_parallel = first_node_in_chain[0]
-            if isinstance(first_item_in_parallel, Step):
-                current_sequence_effective_input = first_item_in_parallel.input_model
-            elif isinstance(first_item_in_parallel, Branch) and first_item_in_parallel.steps and isinstance(first_item_in_parallel.steps[0], Step):
-                 current_sequence_effective_input = first_item_in_parallel.steps[0].input_model
-        elif isinstance(first_node_in_chain, Branch) and first_node_in_chain.steps and isinstance(first_node_in_chain.steps[0], Step):
-            current_sequence_effective_input = first_node_in_chain.steps[0].input_model
-
-
-    table.add_row(
-        "SequenceInput",
-        "-",
-        current_sequence_effective_input.__name__ if current_sequence_effective_input else "Any/Untyped",
-        f"[{STYLE['info']}]INFO[/{STYLE['info']}]",
-        f"Input to this sequence."
-    )
-
-    effective_prev_output_model = current_sequence_effective_input
-
-    for i, node_instance in enumerate(nodes):
-        node_name_str = _get_node_name_for_path(node_instance, i)
-        relative_node_path = f"[{i}]::{node_name_str}"
-        full_node_path_for_issue = f"{base_path_for_issues}{relative_node_path}"
-
-        if isinstance(node_instance, Step):
-            step_input_model = node_instance.input_model
-            step_output_model = node_instance.output_model
-            input_model_name = step_input_model.__name__ if step_input_model else "N/A"
-            output_model_name = step_output_model.__name__ if step_output_model else "N/A"
-            status_style, status_text, details = STYLE['info'], "INFO", ""
-
-            if not step_input_model:
-                status_style, status_text, details = STYLE['error'], "ERROR", "Step has no input_model defined."
-                validation_issues.append(f"{full_node_path_for_issue}: {details}")
-            elif effective_prev_output_model:
-                if step_input_model == effective_prev_output_model:
-                    status_style, status_text, details = STYLE['success'], "OK", f"Matches previous output ({effective_prev_output_model.__name__})."
-                elif effective_prev_output_model == _DictOutputType and step_input_model != dict:
-                    status_style, status_text, details = STYLE['error'], "ERROR", f"Input '{input_model_name}' received Dict[str,Any] from parallel block. Ensure compatibility or use an adapter."
-                    validation_issues.append(f"{full_node_path_for_issue}: {details}")
-                else:
-                    status_style, status_text, details = STYLE['error'], "ERROR", f"Input '{input_model_name}' mismatches previous output '{effective_prev_output_model.__name__}'."
-                    validation_issues.append(f"{full_node_path_for_issue}: {details}")
-            else: # No previous output model to compare against (e.g. first step after untyped ApplyNode)
-                details = "First step in sequence or follows untyped node."
-            
-            if not step_output_model:
-                current_status_is_error = status_text == "ERROR"
-                status_style, status_text = STYLE['error'], "ERROR"
-                details = (details + " | " if details and not current_status_is_error else "") + "Step has no output_model defined."
-                validation_issues.append(f"{full_node_path_for_issue}: No output_model defined.")
-
-            table.add_row(relative_node_path, input_model_name, output_model_name, f"[{status_style}]{status_text}[/{status_style}]", details)
-            effective_prev_output_model = step_output_model if status_text != "ERROR" else None
-
-        elif isinstance(node_instance, ApplyNode):
-            table.add_row(relative_node_path, "Any", "Any", f"[{STYLE['info']}]INFO[/{STYLE['info']}]", "ApplyNode: Untyped I/O. Output is considered Any.")
-            effective_prev_output_model = None
-
-        elif isinstance(node_instance, Branch):
-            table.add_row(relative_node_path, effective_prev_output_model.__name__ if effective_prev_output_model else "Any", "↪ (see sub-table)", f"[{STYLE['info']}]BRANCH[/{STYLE['info']}]", f"Details for branch '{node_name_str}' in separate table.")
-            
-            branch_output_model = _perform_validation_for_sequence(
-                sequence_name=f"Branch: {node_name_str} (from {full_node_path_for_issue})",
-                nodes=node_instance.steps,
-                input_to_sequence=effective_prev_output_model,
-                base_path_for_issues=f"{full_node_path_for_issue}.",
-                console_obj=console_obj,
-                validation_issues=validation_issues
-            )
-            effective_prev_output_model = branch_output_model
-
-        elif isinstance(node_instance, list): # Parallel Block
-            block_input_name = effective_prev_output_model.__name__ if effective_prev_output_model else "Any"
-            table.add_row(relative_node_path, block_input_name, _DictOutputType.__name__, f"[{STYLE['info']}]PARALLEL[/{STYLE['info']}]", f"{node_name_str} block. Output is Dict[str,Any]. Items validated below if Steps, or in sub-tables if Branches.")
-
-            is_parallel_steps = node_name_str == "ParallelSteps"
-
-            if is_parallel_steps:
-                for sub_i, sub_node in enumerate(node_instance): # sub_node is Step or ApplyNode
-                    sub_node_name = _get_node_name_for_path(sub_node, sub_i)
-                    sub_relative_path = f"{relative_node_path}.[{sub_i}]::{sub_node_name}"
-                    sub_full_path_issue = f"{full_node_path_for_issue}.[{sub_i}]::{sub_node_name}"
-
-                    if isinstance(sub_node, Step):
-                        s_input, s_output = sub_node.input_model, sub_node.output_model
-                        s_in_name, s_out_name = (s_input.__name__ if s_input else "N/A"), (s_output.__name__ if s_output else "N/A")
-                        s_style, s_text, s_details = STYLE['info'], "INFO", ""
-                        if not s_input:
-                            s_style, s_text, s_details = STYLE['error'], "ERROR", "No input_model."
-                            validation_issues.append(f"{sub_full_path_issue}: {s_details}")
-                        elif effective_prev_output_model and s_input != effective_prev_output_model:
-                            s_style, s_text, s_details = STYLE['error'], "ERROR", f"Input '{s_in_name}' mismatches block input '{block_input_name}'."
-                            validation_issues.append(f"{sub_full_path_issue}: {s_details}")
-                        else:
-                            s_style, s_text, s_details = STYLE['success'], "OK", f"Input matches block input ({block_input_name})."
-                        if not s_output: # Should be caught by Step init
-                             s_style, s_text = STYLE['error'], "ERROR"; s_details += " | No output_model."
-                             validation_issues.append(f"{sub_full_path_issue}: No output_model.")
-                        table.add_row(sub_relative_path, s_in_name, s_out_name, f"[{s_style}]{s_text}[/{s_style}]", s_details)
-                    elif isinstance(sub_node, ApplyNode):
-                        table.add_row(sub_relative_path, "Any", "Any", f"[{STYLE['info']}]INFO[/{STYLE['info']}]", "Parallel ApplyNode.")
-            
-            elif node_name_str == "ParallelBranches": # List of Branches
-                for sub_i, sub_branch_node in enumerate(node_instance):
-                    if isinstance(sub_branch_node, Branch):
-                        sub_branch_name = _get_node_name_for_path(sub_branch_node, sub_i)
-                        sub_branch_relative_path_marker = f"{relative_node_path}.[{sub_i}]::{sub_branch_name}"
-                        sub_branch_full_path_issue_base = f"{full_node_path_for_issue}.[{sub_i}]::{sub_branch_name}"
-                        
-                        table.add_row(sub_branch_relative_path_marker, block_input_name, "↪ (see sub-table)", f"[{STYLE['info']}]BRANCH[/{STYLE['info']}]", f"Parallel branch '{sub_branch_name}'. Details in sub-table.")
-                        
-                        _perform_validation_for_sequence(
-                            sequence_name=f"Parallel Branch: {sub_branch_name} (from {sub_branch_full_path_issue_base})",
-                            nodes=sub_branch_node.steps,
-                            input_to_sequence=effective_prev_output_model, # Input to the parallel block
-                            base_path_for_issues=f"{sub_branch_full_path_issue_base}.",
-                            console_obj=console_obj,
-                            validation_issues=validation_issues
-                        )
-            effective_prev_output_model = _DictOutputType
-        else: # Unknown node type
-            table.add_row(relative_node_path, "?", "?", f"[{STYLE['warning']}]UNKNOWN[/{STYLE['warning']}]", f"Unknown node type: {type(node_instance).__name__}")
-            validation_issues.append(f"{full_node_path_for_issue}: Unknown node type {type(node_instance).__name__}")
-            effective_prev_output_model = None
-            
-    console_obj.print(table)
-    return effective_prev_output_model # Return the output model of the last processed node in this sequence
 
 if __name__ == "__main__":
-    app()
+    app() 

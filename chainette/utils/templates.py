@@ -14,7 +14,7 @@ Usage
 """
 
 from typing import Any, Mapping
-from jinja2 import Environment, select_autoescape, FileSystemLoader, StrictUndefined
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 __all__ = ["render"]
 
@@ -22,7 +22,7 @@ __all__ = ["render"]
 # Using StrictUndefined to raise errors for undefined variables in templates
 env = Environment(
     loader=FileSystemLoader("."),  # Dummy loader, not used for string templates
-    autoescape=select_autoescape(['html', 'xml']), # Though not strictly necessary for text prompts
+    autoescape=False, # Disable auto-escaping
     undefined=StrictUndefined
 )
 

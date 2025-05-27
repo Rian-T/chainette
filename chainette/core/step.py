@@ -1,34 +1,34 @@
 from __future__ import annotations
 
-"""chainette.core.step – single LLM invocation node.
+"""Chainette Step implementation.
 
-This final version ensures **mandatory guided JSON decoding** derived from
-``output_model.model_json_schema()`` and gracefully handles either the
-lightweight wrapper *or* vLLM's native :class:`SamplingParams` object.
+A *Step* is a single LLM invocation that converts a list of *input_model*
+objects into a list of *output_model* objects.
 """
 
-import hashlib
+from typing import List, Tuple, Type, Any, Optional, Dict
 import json
-from typing import Any, List, Sequence, Type, Dict, Optional, Tuple
-import concurrent.futures
-import time
 
-import requests
 from pydantic import BaseModel
-from vllm import SamplingParams  # type: ignore
-from vllm.sampling_params import GuidedDecodingParams  # type: ignore
+from transformers import AutoTokenizer
 
-from chainette.engine.registry import get_engine_config
-from chainette.engine.runtime import spawn_engine
 from chainette.utils.templates import render
+from chainette.engine.registry import get_engine_config
+from chainette.core.node import Node
+from chainette.io.writer import RunWriter
+from chainette.utils.json_schema import generate_json_output_prompt
 
-from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn, TaskID
+from vllm import SamplingParams
+from vllm.sampling_params import GuidedDecodingParams
 
-__all__ = ["Step"]
-class Step:  # noqa: D101
-    """Declarative definition and execution of a single model call."""
+__all__ = [
+    "Step",
+    "SamplingParams",
+    "GuidedDecodingParams",
+]
 
+
+class Step(Node):
     def __init__(
         self,
         *,
@@ -37,254 +37,173 @@ class Step:  # noqa: D101
         input_model: Type[BaseModel],
         output_model: Type[BaseModel],
         engine_name: str,
-        sampling: SamplingParams | Any,
-        system_prompt: str,
-        user_prompt: str,
-        emoji: str = "🔗",
-    ) -> None:  # noqa: D401, ANN001
+        sampling: SamplingParams,
+        system_prompt: str = "",
+        user_prompt: str = "{{input}}",
+        emoji: str | None = None,
+        output_format_instruction: str | None = None,
+        yield_output: bool = True,
+    ) -> None:
         self.id = id
         self.name = name
-        self.emoji = emoji
         self.input_model = input_model
         self.output_model = output_model
         self.engine_name = engine_name
-        self._base_sampling = sampling
-        self.system_prompt = system_prompt
-        self.user_prompt = user_prompt
+        self.sampling = sampling
 
-        # ------------------------------------------------------------------
-        # Pre‑compute guided‑decoding schema and deterministic signature
-        # ------------------------------------------------------------------
+        self.tokenizer = None
+        self.max_model_len = None
+        self.engine = None
 
-        schema_json = json.dumps(self.output_model.model_json_schema())
-        self._guided = GuidedDecodingParams(json=schema_json)
+        _original_system_prompt = system_prompt.strip()
 
-        sampling_blob = (
-            sampling.as_dict()  # our thin wrapper
-            if hasattr(sampling, "as_dict")
-            else getattr(sampling, "model_dump", lambda: vars(sampling))()
-        )
-        self._sig = hashlib.md5(
-            f"{id}{schema_json}{json.dumps(sampling_blob, default=str)}".encode(),
-            usedforsecurity=False,
-        ).hexdigest()[:8]
-
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
-
-    def _sampling_with_guidance(self) -> SamplingParams:  # noqa: D401
-        if hasattr(self._base_sampling, "model_dump"):
-            d = self._base_sampling.model_dump()
-        elif hasattr(self._base_sampling, "as_dict"):
-            d = self._base_sampling.as_dict()
+        if output_format_instruction is None:
+            json_instruction_string = generate_json_output_prompt(self.output_model)
         else:
-            d = dict(vars(self._base_sampling))
-        d["guided_decoding"] = self._guided
-        return SamplingParams(**d)
-    
-    def _prepare_request_body(self, inp: BaseModel, cfg, sp_dict: Dict) -> Dict:
-        """Prepare the request body for a single input."""
-        ctx = inp.model_dump()
-        sys_msg = render(self.system_prompt, ctx) if self.system_prompt else ""
-        usr_msg = render(self.user_prompt, ctx)
+            json_instruction_string = output_format_instruction.strip()
+
+        if _original_system_prompt and json_instruction_string:
+            self.system_prompt = f"{_original_system_prompt}\n\n{json_instruction_string}"
+        elif json_instruction_string:
+            self.system_prompt = json_instruction_string
+        else:
+            self.system_prompt = _original_system_prompt
+
+        self.user_prompt = user_prompt.strip()
+        self.emoji = emoji or ""
+        self.yield_output = yield_output
+
+        json_schema = self.output_model.model_json_schema()
+        guided_params = GuidedDecodingParams(json=json_schema)
+        self.sampling.guided_decoding = guided_params
+
+    def _build_prompt(self, item_history: Dict[str, Any]) -> str:
+        rendering_context = {}
+        for key, value in item_history.items():
+            if isinstance(value, BaseModel): # Check if Pydantic model
+                model_dict = value.model_dump()
+                for field_name, field_val in model_dict.items():
+                    rendering_context[f"{key}.{field_name}"] = field_val
+                rendering_context[key] = value # Keep original model object as well
+            else:
+                rendering_context[key] = value # For non-model items like 'chain_input' or 'step_id.reasoning_content'
 
         messages = []
-        if sys_msg:
-            messages.append({"role": "system", "content": sys_msg})
-        messages.append({"role": "user", "content": usr_msg})
 
-        return {
-            "model": cfg.model,
-            "messages": messages,
-            **sp_dict,
-            "stream": False,
-            "guided_json": self._guided.json,
-        }
-    
-    def _make_api_request(self, url: str, body: Dict, headers: Dict, timeout: int = 1200) -> Tuple[Optional[BaseModel], Optional[Exception]]:
-        """Make a single API request and handle parsing."""
-        try:
-            resp = requests.post(url, json=body, headers=headers, timeout=timeout)
-            resp.raise_for_status()
-            text = resp.json()["choices"][0]["message"]["content"]
-            parsed = self.output_model.model_validate_json(text)
-            return parsed, None
-        except requests.RequestException as e:
-            return None, e
-        except Exception as exc:
-            return None, exc
+        rendered_system_prompt = render(self.system_prompt, rendering_context) if self.system_prompt else ""
+        if rendered_system_prompt:
+            messages.append({"role": "system", "content": rendered_system_prompt})
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+        rendered_user_prompt = render(self.user_prompt, rendering_context)
+        messages.append({"role": "user", "content": rendered_user_prompt})
 
-    def run(
-        self, 
-        inputs: Sequence[BaseModel], 
-        *, 
-        run_id: str, 
-        step_index: int, 
-        batch_size: int = None,
-        main_progress: Optional[Progress] = None,
-        parent_description_prefix: str = ""
-    ) -> List[BaseModel]:  # noqa: D401,WPS231
-        """Run the step on input data with batched processing.
-        
-        Parameters
-        ----------
-        inputs : Sequence[BaseModel]
-            The input records to process
-        run_id : str
-            Unique run identifier
-        step_index : int or str
-            Step index for tracking
-        batch_size : int, optional
-            Batch size for processing. If None, gets batch size from chain context.
-        main_progress : Optional[Progress], optional
-            An existing Rich Progress instance to use for displaying progress.
-        parent_description_prefix : str, optional
-            A prefix for the description of tasks added to main_progress.
+        if not messages:
+            return ""
             
-        Returns
-        -------
-        List[BaseModel]
-            List of output models
-        """
-        console = Console()
+        # Ensure tokenizer is initialized
+        if self.tokenizer is None:
+            cfg = get_engine_config(self.engine_name)
+            self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
 
-        if not inputs:
-            return []
+        return self.tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=True,
+        )
 
-        # Determine the batch size
-        # If not explicitly provided, use context from thread-local or default to 16
-        if batch_size is None:
-            from threading import current_thread
-            thread_locals = getattr(current_thread(), "__dict__", {})
-            chain_context = thread_locals.get("chain_context", {})
-            batch_size = chain_context.get("batch_size", 16)
-        
-        batch_size = max(1, batch_size)  # Ensure at least 1
+    def _parse_output(self, llm_output: Any) -> Tuple[BaseModel, Optional[str]]:
+        first_completion = llm_output.outputs[0]
+        text = first_completion.text.strip()
+        print(f"DEBUG: Raw LLM-output text: {text}")
+        reasoning_content: Optional[str] = None
+        if hasattr(first_completion, "reasoning"):
+            reasoning_content = str(first_completion.reasoning)
+        elif hasattr(first_completion, "reasoning_content"):
+            reasoning_content = str(first_completion.reasoning_content)
+
+        try:
+            data = json.loads(text)
+            obj = self.output_model.model_validate(data)
+            return obj, reasoning_content
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Invalid JSON output from '{self.engine_name}' for step '{self.id}': {text}. Error: {e}")
+        except Exception as exc:
+            raise ValueError(f"Failed to validate output for step '{self.id}': {exc}\nModel: {self.engine_name}\nOutput: {text}")
+
+    def execute(
+        self,
+        inputs: List[BaseModel],
+        item_histories: List[Dict[str, Any]],
+        writer: RunWriter | None = None,
+        debug: bool = False,
+        batch_size: int = 0, # Default to 0 means no batching or handle full list
+    ) -> Tuple[List[BaseModel], List[Dict[str, Any]]]:
+        if len(inputs) != len(item_histories):
+            raise ValueError("Mismatch between number of inputs and item_histories in Step.execute")
 
         cfg = get_engine_config(self.engine_name)
-        engine = spawn_engine(cfg)
-        sp = self._sampling_with_guidance()
+        if self.engine is None:
+            self.engine = cfg.engine
+            # Re-initialize tokenizer whenever engine is initialized
+            self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
 
-        url = f"http://127.0.0.1:{engine.port}/v1/chat/completions"
-        headers = {"Content-Type": "application/json"}
+        all_parsed_outputs: List[BaseModel] = []
+        all_new_item_histories: List[Dict[str, Any]] = []
 
-        # Convert sampling params to dict
-        if hasattr(sp, "model_dump"):
-            sp_dict = sp.model_dump(exclude_none=True)
-        elif hasattr(sp, "as_dict"):
-            sp_dict = sp.as_dict()
-        else:
-            sp_dict = {k: v for k, v in vars(sp).items() if v is not None}
+        # Determine actual batch_size: if 0 or less, or larger than inputs, process all at once
+        effective_batch_size = batch_size if batch_size > 0 and batch_size < len(inputs) else len(inputs)
+        if effective_batch_size == 0 and len(inputs) > 0: # handle case where inputs might be empty
+             effective_batch_size = len(inputs)
+        elif len(inputs) == 0:
+            return [], []
 
-        outputs = []
-        
-        # Create batches
-        batches = [list(inputs[i:i + batch_size]) for i in range(0, len(inputs), batch_size)]
 
-        if not main_progress:
-            # Fallback to creating its own Progress instance if none is provided
-            console_for_step = Console()
-            with Progress(
-                SpinnerColumn(),
-                TextColumn("[blue]{task.description}"),
-                BarColumn(bar_width=None),
-                TaskProgressColumn(),
-                TimeElapsedColumn(),
-                console=console_for_step,
-                transient=True,
-            ) as progress_instance:
-                return self._process_batches(
-                    inputs, batches, cfg, sp_dict, url, headers, progress_instance, 
-                    parent_description_prefix or f"[cyan]Step '{self.name}'"
-                )
-        else:
-            # Use the provided main_progress instance
-            return self._process_batches(
-                inputs, batches, cfg, sp_dict, url, headers, main_progress, 
-                parent_description_prefix or f"[cyan]Step '{self.name}'"
-            )
+        for i in range(0, len(inputs), effective_batch_size):
+            batch_inputs = inputs[i:i + effective_batch_size]
+            batch_item_histories = item_histories[i:i + effective_batch_size]
 
-    def _process_batches(
-        self,
-        inputs: Sequence[BaseModel],
-        batches: List[List[BaseModel]],
-        cfg: Any, # EngineConfig
-        sp_dict: Dict,
-        url: str,
-        headers: Dict,
-        progress_instance: Progress,
-        description_prefix: str
-    ) -> List[BaseModel]:
-        """Helper method to process batches and update progress."""
-        outputs = []
-        console = Console() # For error printing if needed, separate from progress
+            prompts = [self._build_prompt(hist) for hist in batch_item_histories]
 
-        # Add a single task for the entire step's item processing
-        # This task will show total items for the step and advance per item.
-        # Its description will be updated to show current batch info.
-        step_item_task_id: Optional[TaskID] = None
-        if progress_instance: # Ensure progress_instance is not None
-            step_item_task_id = progress_instance.add_task(
-                f"{description_prefix}: Preparing...",
-                total=len(inputs)
-            )
+            if debug:
+                print(f"DEBUG: Step '{self.id}' processing batch {i // effective_batch_size + 1} with {len(batch_inputs)} items.")
+                # Optionally print one prompt from the batch for brevity
+                if prompts:
+                    print(f"DEBUG: Sample prompt from batch: {prompts[0][:500]}...") # Print first 500 chars
 
-        for batch_idx, batch in enumerate(batches):
-            if progress_instance and step_item_task_id is not None:
-                progress_instance.update(
-                    step_item_task_id,
-                    description=f"{description_prefix}: Batch {batch_idx+1}/{len(batches)} ({len(batch)} items)"
-                )
-            
-            request_bodies = [self._prepare_request_body(inp, cfg, sp_dict) for inp in batch]
-            batch_outputs_list = [None] * len(batch) # Use list for ordered results
-            batch_errors_info = []
+            outputs_raw_batch = self.engine.generate(prompts=prompts, sampling_params=self.sampling)
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(batch), 32)) as executor:
-                future_to_idx_map = {
-                    executor.submit(self._make_api_request, url, body, headers): original_idx 
-                    for original_idx, body in enumerate(request_bodies)
-                }
-                
-                for future in concurrent.futures.as_completed(future_to_idx_map):
-                    original_idx = future_to_idx_map[future]
-                    result, error = future.result()
+            batch_parsed_outputs: List[BaseModel] = []
+            batch_new_item_histories: List[Dict[str, Any]] = []
+
+            for j, raw_out in enumerate(outputs_raw_batch):
+                original_item_history = batch_item_histories[j]
+                try:
+                    parsed_output, reasoning = self._parse_output(raw_out)
+                    batch_parsed_outputs.append(parsed_output)
                     
-                    if error:
-                        batch_errors_info.append((original_idx, error))
-                    else:
-                        batch_outputs_list[original_idx] = result
-                    
-                    if progress_instance and step_item_task_id is not None:
-                        progress_instance.update(step_item_task_id, advance=1)
-            
-            if batch_errors_info:
-                # Log errors (consider using progress_instance.log or console.print)
-                # For now, just print to console to avoid interfering with progress display too much
-                error_summary_msg = f"[red]❌ {description_prefix}: {len(batch_errors_info)} errors in batch {batch_idx+1}."
-                # To prevent flooding, print summary or use progress.log if available and desired
-                if progress_instance:
-                    progress_instance.log(error_summary_msg)
-                else:
-                    console.print(error_summary_msg)
+                    # Update history for this item
+                    updated_history = original_item_history.copy()
+                    if self.yield_output:
+                        updated_history[self.id] = parsed_output
+                    if reasoning:
+                        updated_history[f"{self.id}_reasoning"] = reasoning
+                    batch_new_item_histories.append(updated_history)
 
+                except ValueError as e:
+                    print(f"Warning: Skipping item due to parsing/validation error in step '{self.id}': {e}")
+                    # Append original history if output is skipped, or decide on error handling
+                    batch_new_item_histories.append(original_item_history.copy()) 
+                    # Optionally, append a placeholder or error object to batch_parsed_outputs
+                    # For now, we just skip adding to batch_parsed_outputs for this item
 
-            # Extend outputs with successfully processed items, maintaining order
-            for out_item in batch_outputs_list:
-                if out_item is not None: # Only add successful items
-                    outputs.append(out_item)
+            all_parsed_outputs.extend(batch_parsed_outputs)
+            all_new_item_histories.extend(batch_new_item_histories)
+
+            if writer is not None and self.yield_output and batch_parsed_outputs:
+                # Write only the successfully parsed outputs of the current batch
+                writer.write_step(self.id, batch_parsed_outputs)
+                if debug:
+                    print(f"DEBUG: Step '{self.id}' wrote {len(batch_parsed_outputs)} outputs for batch {i // effective_batch_size + 1} to writer.")
         
-        if progress_instance and step_item_task_id is not None:
-            progress_instance.remove_task(step_item_task_id)
-            
-        return outputs
-
-    # convenience -----------------------------------------------------------
-
-    def signature(self) -> str:  # noqa: D401
-        return self._sig
+        # The writer.finalize() will be called at the end of the Chain.run()
+        return all_parsed_outputs, all_new_item_histories

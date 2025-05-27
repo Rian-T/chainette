@@ -7,7 +7,7 @@
 *   📜 Inputs & outputs are **Pydantic** models – no more brittle string parsing
 *   🎯 Automatic JSON **guided decoding**: the model must reply with the schema you declare
 *   🗂️ Filesystem first – every run leaves reproducible artefacts (`graph.json`, step files, flattened view)
-*   🖥️ Simple CLI: `warmup | run | kill`
+*   🖥️ Simple CLI: `warmup | run | kill | inspect`
 
 ## Install
 
@@ -119,10 +119,13 @@ Chainette provides a simple CLI for managing LLM engines:
 
 ```bash
 # Start non-lazy engines
-chainette warmup -f engines.yml
+chainette warmup -f engines.yml -e llama3
 
 # Run a chain from a module
 chainette run examples.qa:my_chain -i inputs.json --output_dir results
+
+# Run a chain using huggingface datasets
+chainette run examples.qa:my_chain -i dataset_name/split_name --columns input_column_name_1,input_column_name_2 --output_dir results
 
 # Terminate engines
 chainette kill --all

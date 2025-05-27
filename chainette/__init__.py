@@ -13,8 +13,9 @@ __version__ = "0.1.0"
 # Core components
 from chainette.core.step import Step, SamplingParams, GuidedDecodingParams
 from chainette.core.chain import Chain
-from chainette.core.branch import Branch, Node
-from chainette.core.apply import ApplyNode, apply
+from chainette.core.branch import Branch
+from chainette.core.node import Node
+from chainette.core.apply import ApplyNode, apply, Apply
 
 # Engine registry functions
 from chainette.engine.registry import (
@@ -36,6 +37,7 @@ __all__ = [
     "Branch",
     "Node",
     "ApplyNode",
+    "Apply",
     
     # Functions
     "apply",
