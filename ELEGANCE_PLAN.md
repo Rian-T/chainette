@@ -43,18 +43,48 @@ Key ideas:
 5. **PromptRenderer** utility class.
 6. **BaseResult** object carries value *and* metadata (reasoning, timing, errors).
 
-## 3 – Roadmap / TODO
+## Guiding Principle – Keep It Tiny & Readable
 
-- [ ] **Design docs** – flesh out data-flow & class diagrams (this file will grow).
-- [ ] **Introduce `Graph` & `Edge` classes** (non-breaking, unused at first).
-- [ ] **Refactor `Branch` to extend `Node` and hold internal `Graph`**.
-- [ ] **Extract `EnginePool`** from `chain.core` into `chainette.engine.pool`.
-- [ ] **Move prompt logic to `PromptRenderer` (utils/prompt.py)**.
-- [ ] **Re-implement `Step.execute` using new renderer & EnginePool**.
-- [ ] **Rewrite `Chain.run` into generic DAG walker** (supports recursion, joins later).
-- [ ] **Introduce async execution path** (optional) with `anyio`.
-- [ ] **Back-compat shim**: keep current API surface (`Chain.run`, etc.).
-- [ ] **Comprehensive tests** with Ollama Gemma for happy path, plus unit tests for Graph traversal.
+Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
+• Favour explicit, straightforward constructs over clever abstractions.
+• Each module should fit on one screen (<150 LOC) when possible.
+• Zero hidden magic; public API ≈ internal flow.
+• New dependencies require strong justification.
+
+(Every change below must be evaluated against this principle.)
+
+## 3 – Roadmap / TODO  (updated)
+
+- [ ] **Design docs** – detailed diagrams + LOC budget for each new module.
+- Graph layer
+  - [ ] Introduce `graph.py` with `Node`, `Edge`, `Graph` (<120 LOC).
+  - [ ] Provide `.connect(node)` helper for fluent graph building.
+- Branch composite
+  - [ ] Refactor `Branch` → subclass `CompositeNode` in ≤40 LOC.
+- Execution engine
+  - [ ] Create `executor.py` (≤150 LOC) with generic DAG walker.
+  - [ ] Batching/engine-reuse logic lives here; Step becomes thin wrapper.
+- Prompt renderer
+  - [ ] `prompt.py` (≤80 LOC) – pure functions, no side-effects.
+- Engine pool
+  - [ ] `pool.py` (≤60 LOC) – context manager + simple LRU of live engines.
+- Step refactor
+  - [ ] Remove batching/prompt logic; delegate to renderer & executor.
+  - [ ] Target ≤120 LOC total.
+- Chain facade
+  - [ ] Keep current `Chain` API but proxy to `Graph`/`Executor`.
+- Error model
+  - [ ] Define `Result` dataclass with `value | error` (≤30 LOC).
+- Async option
+  - [ ] Optional `AsyncExecutor` (≤120 LOC) using `anyio`.
+- Docs & style
+  - [ ] Update README + `llm.txt` to reflect new architecture.
+  - [ ] Add `CONTRIBUTING.md` emphasising simplicity rule.
+- Tests
+  - [ ] Unit tests for graph traversal, pooling, renderer.
+  - [ ] Integration tests: vLLM mock + Ollama Gemma path.
+
+*(Line counts are soft caps to enforce minimalism.)*
 
 ## 4 – Acceptance Criteria
 1. All existing examples (`ollama_gemma_test`, `product_struct_extract`, etc.) still run unchanged.
