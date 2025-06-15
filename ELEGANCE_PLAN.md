@@ -87,6 +87,10 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
   - [ ] Static graph validation tests (model I/O compatibility).
 - Logging
   - [ ] Centralised structured logger with verbosity levels (<40 LOC).
+- DSL / Builder
+  - [ ] Design a fluent DSL for pipeline construction (e.g. `qa >> filter >> (fr | es)`).
+  - [ ] Support declarative joins and branch IDs (inspired by NoSQL joins / Airflow syntax).
+  - [ ] Maintain backwards-compat with `steps=[...]` list form.
 
 *(Line counts are soft caps to enforce minimalism.)*
 
