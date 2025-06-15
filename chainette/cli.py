@@ -188,6 +188,8 @@ def run(
     generate_flattened: bool = typer.Option(True, "--flattened/--no-flattened", help="Generate a single flattened output file."),
     max_lines_per_file: int = typer.Option(1000, help="Maximum lines per output data file."),
     stream_writer: bool = typer.Option(False, "--stream-writer/--no-stream-writer", help="Use the new incremental StreamWriter."),
+    quiet: bool = typer.Option(False, "--quiet", help="Disable live progress/output."),
+    json_logs: bool = typer.Option(False, "--json-logs", help="Emit JSON event logs instead of Rich UI."),
 ):
     """Run a chain with inputs from a JSONL file and save results."""
     console.print(f"[cyan]Running chain '{chain_name}' from {chain_file}...[/]")
@@ -254,6 +256,27 @@ def run(
 
             writer = RunWriter(output_dir, max_lines_per_file=max_lines_per_file, fmt="jsonl")
 
+        if not quiet and not json_logs:
+            from chainette.utils.logging_v2 import show_dag_tree  # noqa: WPS433
+
+            step_ids = [
+                s.id if not isinstance(s, list) else "parallel_branches" for s in chain_obj.steps
+            ]
+            show_dag_tree(step_ids)
+
+        if json_logs:
+            # Simple JSON print of events
+            from chainette.utils.events import subscribe, BatchStarted, BatchFinished
+            import json as _json
+
+            @subscribe(BatchStarted)
+            def _log_bs(e):
+                print(_json.dumps({"event": "batch_started", **e.__dict__}))
+
+            @subscribe(BatchFinished)
+            def _log_bf(e):
+                print(_json.dumps({"event": "batch_finished", **e.__dict__}))
+
         chain_obj.run(
             inputs=inputs_data,
             writer=writer,
@@ -262,6 +285,12 @@ def run(
             generate_flattened_output=generate_flattened,
             max_lines_per_file=max_lines_per_file,
         )
+
+        if not quiet and not json_logs:
+            from chainette.utils.logging_v2 import stop as _stop_progress
+
+            _stop_progress()
+
         console.print("[bold green]Chain execution finished successfully![/]")
         console.print(f"Results written to {output_dir}")
     except Exception as e:

@@ -51,9 +51,9 @@ Key ideas:
   - [x] Unit tests: basic jsonl & parquet chunking (RAM stress test pending).
 - EventBus / Logger
   - [x] Tiny `events.py` with `@dataclass` events + `subscribe/publish` helpers.
-  - [ ] Logger module v2: rich `Tree`, per-step `Progress`, coloured levels.
-  - [ ] CLI: `chainette run` prints DAG tree then live progress.
-  - [ ] Add `--quiet` & `--json-logs` flags.
+  - [x] Logger module v2: rich `Tree`, per-step `Progress`, coloured levels.
+  - [x] CLI: `chainette run` prints DAG tree then live progress.
+  - [x] Add `--quiet` & `--json-logs` flags.
 - CLI & Config
   - [x] New `--stream-writer` flag defaults *on* when batch_size > 0 (basic flag added; default logic pending).
   - [ ] `chainette inspect` to display tree only (no run).
