@@ -45,17 +45,17 @@ Key ideas:
   - [ ] Refactor `Executor.run` to *yield batches* instead of returning full lists.
   - [ ] Release references to processed batches (`del` → encourage GC).
 - StreamWriter
-  - [ ] Implement incremental write with rolling filenames `000.jsonl`, `001.jsonl`, … per split.
+  - [x] Implement incremental write with rolling filenames `000.jsonl`, `001.jsonl`, … per split.
   - [ ] Add Parquet support via `pyarrow` (optional extra).
   - [ ] Implement `flatten_row(batch_dict)` generator so flattening never loads full datasets.
   - [ ] Unit tests: (1) 10 K fake rows RAM-check, (2) join merge correctness.
 - EventBus / Logger
-  - [ ] Tiny `events.py` with `@dataclass` events + `subscribe/publish` helpers.
+  - [x] Tiny `events.py` with `@dataclass` events + `subscribe/publish` helpers.
   - [ ] Logger module v2: rich `Tree`, per-step `Progress`, coloured levels.
   - [ ] CLI: `chainette run` prints DAG tree then live progress.
   - [ ] Add `--quiet` & `--json-logs` flags.
 - CLI & Config
-  - [ ] New `--stream-writer` flag defaults *on* when batch_size > 0.
+  - [x] New `--stream-writer` flag defaults *on* when batch_size > 0 (basic flag added; default logic pending).
   - [ ] `chainette inspect` to display tree only (no run).
 - Docs
   - [ ] Add *Runner* section in README & snippet in `llm.txt`.

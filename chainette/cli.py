@@ -256,10 +256,11 @@ def run(
 
         chain_obj.run(
             inputs=inputs_data,
+            writer=writer,
             output_dir=output_dir,
-            fmt="jsonl", # Currently hardcoded, could be an option
+            fmt="jsonl",  # Currently hardcoded, could be an option
             generate_flattened_output=generate_flattened,
-            max_lines_per_file=max_lines_per_file
+            max_lines_per_file=max_lines_per_file,
         )
         console.print("[bold green]Chain execution finished successfully![/]")
         console.print(f"Results written to {output_dir}")

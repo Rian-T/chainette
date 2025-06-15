@@ -21,7 +21,7 @@ from typing import Any, Dict, IO, List
 import json
 from itertools import count
 
-from datasets import parquet, Features  # type: ignore
+from datasets import Features  # type: ignore
 from pydantic import BaseModel
 
 from chainette.utils.ids import snake_case
