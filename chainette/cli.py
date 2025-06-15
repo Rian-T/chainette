@@ -360,5 +360,25 @@ def run_yaml(
 
     console.print("[green]YAML chain finished.[/]")
 
+# --------------------------------------------------------------------------- #
+# New DAG-only inspector
+# --------------------------------------------------------------------------- #
+
+
+@app.command("inspect-dag")
+def inspect_dag(
+    chain_file: Path = typer.Argument(..., help="Python file containing chain."),
+    chain_name: str = typer.Argument(..., help="Chain variable name."),
+):
+    """Print a Rich DAG tree without executing the chain."""
+    chain_obj = _load_chain_from_file(chain_file, chain_name)
+
+    step_ids = [s.id if not isinstance(s, list) else "parallel_branches" for s in chain_obj.steps]
+
+    from chainette.utils.logging_v2 import show_dag_tree  # noqa: WPS433
+
+    show_dag_tree(step_ids)
+    console.print(f"[green]DAG inspection complete – {len(step_ids)} top-level nodes shown.[/]")
+
 if __name__ == "__main__":
     app() 

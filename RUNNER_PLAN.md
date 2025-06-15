@@ -56,7 +56,7 @@ Key ideas:
   - [x] Add `--quiet` & `--json-logs` flags.
 - CLI & Config
   - [x] New `--stream-writer` flag defaults *on* when batch_size > 0 (basic flag added; default logic pending).
-  - [ ] `chainette inspect` to display tree only (no run).
+  - [x] `chainette inspect-dag` command to display tree only (no run).
 - Docs
   - [ ] Add *Runner* section in README & snippet in `llm.txt`.
 - Examples
