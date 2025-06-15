@@ -20,6 +20,7 @@ from chainette.utils.json_schema import generate_json_output_prompt
 
 from vllm import SamplingParams
 from vllm.sampling_params import GuidedDecodingParams
+from chainette.utils.prompt import build_prompt
 
 __all__ = [
     "Step",
@@ -78,51 +79,7 @@ class Step(Node):
         self.sampling.guided_decoding = guided_params
 
     def _build_prompt(self, item_history: Dict[str, Any]) -> str:
-        rendering_context = {}
-        for key, value in item_history.items():
-            if isinstance(value, BaseModel): # Check if Pydantic model
-                model_dict = value.model_dump()
-                for field_name, field_val in model_dict.items():
-                    rendering_context[f"{key}.{field_name}"] = field_val
-                rendering_context[key] = value # Keep original model object as well
-            else:
-                rendering_context[key] = value # For non-model items like 'chain_input' or 'step_id.reasoning_content'
-
-        messages = []
-
-        rendered_system_prompt = render(self.system_prompt, rendering_context) if self.system_prompt else ""
-        if rendered_system_prompt:
-            messages.append({"role": "system", "content": rendered_system_prompt})
-
-        rendered_user_prompt = render(self.user_prompt, rendering_context)
-        messages.append({"role": "user", "content": rendered_user_prompt})
-
-        if not messages:
-            return ""
-            
-        cfg = get_engine_config(self.engine_name)
-
-        # For vLLM backend we need tokenizer chat template
-        if getattr(cfg, "backend", "vllm") != "ollama":
-            # Ensure tokenizer is initialized
-            if self.tokenizer is None:
-                self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
-
-        # If using Ollama backend, return simple concatenated prompt (Ollama understands role tags)
-        if getattr(cfg, "backend", "vllm") == "ollama":
-            prompt_lines = []
-            for m in messages:
-                role = m["role"]
-                content = m["content"]
-                prompt_lines.append(f"## {role}\n{content}")
-            prompt_lines.append("## assistant\n")  # Indicate generation start
-            return "\n\n".join(prompt_lines)
-
-        return self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
+        return build_prompt(self, item_history)
 
     def _parse_output(self, llm_output: Any) -> Tuple[BaseModel, Optional[str]]:
         first_completion = llm_output.outputs[0]
