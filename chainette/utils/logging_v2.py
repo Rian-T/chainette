@@ -73,6 +73,7 @@ def show_dag_tree(step_ids):  # noqa: D401
 
 
 def stop():  # noqa: D401
+    global _progress
     if _progress is not None:
         _progress.stop()
         _progress = None 
