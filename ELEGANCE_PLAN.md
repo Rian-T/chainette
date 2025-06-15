@@ -65,8 +65,8 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
   - [x] Create `executor.py` (≤150 LOC) with generic DAG walker.
   - [ ] Batching/engine-reuse logic lives here; Step becomes thin wrapper.
 - Prompt renderer
-  - [ ] `prompt.py` (≤80 LOC) – pure functions, no side-effects.
-  - [ ] `context.py` (≤50 LOC) – builds rendering context from histories.
+  - [x] `prompt.py` (≤80 LOC) – pure functions, no side-effects.
+  - [x] `context.py` (≤50 LOC) – builds rendering context from histories.
 - Engine pool
   - [ ] `pool.py` (≤60 LOC) – context manager + simple LRU of live engines.
 - Step refactor
