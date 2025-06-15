@@ -83,7 +83,7 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
   - [ ] Add `CONTRIBUTING.md` emphasising simplicity rule.
 - Tests
   - [ ] Unit tests for graph traversal, pooling, renderer.
-  - [ ] Integration tests: Ollama Gemma chain covering Steps, Apply, Branches.
+  - [x] Integration tests: Ollama Gemma chain covering Steps, Apply, Branches (`ollama_gemma_features.py`).
   - [ ] Static graph validation tests (model I/O compatibility).
 - Logging
   - [ ] Centralised structured logger with verbosity levels (<40 LOC).
@@ -104,3 +104,8 @@ Introduce `examples/ollama_gemma_features.py` demonstrating:
 • Apply function filtering
 • Parallel Branches (FR / ES translation)
 This serves as high-level regression test during refactor. 
+
+```python
+# example snippet
+qa_step -> filter_apply -> [fr_branch, es_branch]
+``` 
