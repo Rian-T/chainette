@@ -84,20 +84,30 @@ translation_branch_fr = Branch(name="fr_branch", steps=[fr_translate])
 translation_branch_es = Branch(name="es_branch", steps=[es_translate])
 
 # Verification step that echoes translations combined (context usage)
-summary_step = Step(
-    id="summary",
-    name="Echo summary",
+summary_step_fr = Step(
+    id="summary_fr",
+    name="Summary FR",
     input_model=Translation,
     output_model=Summary,
     engine_name="gemma_ollama",
     sampling=SamplingParams(temperature=0.0),
-    system_prompt="Return JSON with key 'summary' repeating the input translation.",
-    user_prompt="{{chain_input.translated}}",
+    system_prompt="Return JSON with key 'summary'.",
+    user_prompt="{{fr.translated}}",
+)
+summary_step_es = Step(
+    id="summary_es",
+    name="Summary ES",
+    input_model=Translation,
+    output_model=Summary,
+    engine_name="gemma_ollama",
+    sampling=SamplingParams(temperature=0.0),
+    system_prompt="Return JSON with key 'summary'.",
+    user_prompt="{{es.translated}}",
 )
 
-# Add summary step to each translation branch
-translation_branch_fr.steps.append(summary_step)
-translation_branch_es.steps.append(summary_step)
+# Replace previous append lines
+translation_branch_fr.steps.append(summary_step_fr)
+translation_branch_es.steps.append(summary_step_es)
 
 # ------------------------------------------------------------------ #
 # Chain definition
