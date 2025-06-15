@@ -19,9 +19,13 @@ Jinja2 = "^3.1.3"
 numpy = "1.26.4"
 setuptools = "^80.3.1"
 openai = "^1.78.1"
+ollama = {version = "^0.1.7", optional = true}
 
 [tool.poetry.scripts]
 chainette = "chainette.cli:app"
+
+[tool.poetry.extras]
+ollama = ["ollama"]
 
 [build-system]
 requires = ["poetry-core"]

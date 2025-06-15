@@ -41,6 +41,9 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
     enable_reasoning: bool = False
     reasoning_parser: Optional[str] = None
 
+    # Engine backend: "vllm" (default) or "ollama"
+    backend: str = "vllm"
+
     # Additional, engine-specific kwargs
     extra: Dict[str, Any] = field(default_factory=dict)
 
@@ -55,10 +58,12 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
     def engine(self):
         """Return the instantiated engine (lazy-loaded once)."""
         if self._engine is None:
-            if _is_vllm_model(self.model):
+            if self.backend == "vllm":
                 self._engine = self._create_vllm_engine()
+            elif self.backend == "ollama":
+                self._engine = self._create_ollama_engine()
             else:
-                raise ValueError("Only vLLM engines are supported at the moment.")
+                raise ValueError(f"Unsupported backend '{self.backend}'.")
         return self._engine
 
     def release_engine(self):
@@ -104,6 +109,18 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
 
         return LLM(**kwargs)
 
+    def _create_ollama_engine(self):
+        """Instantiate an Ollama engine wrapper matching vLLM interface."""
+        try:
+            from chainette.engine.ollama_client import OllamaLLM
+        except ModuleNotFoundError as e:
+            raise ModuleNotFoundError(
+                "Ollama backend requested but 'ollama' package is not installed.\n"
+                "Install with: pip install chainette[ollama] or poetry add --optional ollama"
+            ) from e
+
+        return OllamaLLM(model=self.model)
+
     # -------------------------------------------------- #
 
     def to_dict(self) -> Dict[str, Any]:
@@ -128,6 +145,10 @@ def register_engine(name: str, **kwargs):  # noqa: D401 – simple factory
     extra = {k: v for k, v in kwargs.items() if k not in known_fields}
     cfg_kwargs["extra"] = extra
     cfg_kwargs["name"] = name
+
+    # Default backend fallback
+    if "backend" not in cfg_kwargs:
+        cfg_kwargs["backend"] = "vllm"
 
     cfg = EngineConfig(**cfg_kwargs)
     _REGISTRY[name] = cfg
