@@ -97,6 +97,27 @@ chain = Chain(
 )
 ```
 
+### Branch Joins
+
+Merge outputs from parallel branches back into the main flow with `Branch.join(alias)`. The final output of each branch becomes accessible in later templates via the alias you provide:
+
+```python
+fr_branch = Branch(name="fr", steps=[translate_french]).join("fr")
+es_branch = Branch(name="es", steps=[translate_spanish]).join("es")
+
+agg = Step(
+    id="agg",
+    input_model=Translation,
+    output_model=Summary,
+    engine_name="llama3",
+    sampling=SamplingParams(temperature=0),
+    system_prompt="Summarise both translations.",
+    user_prompt="FR: {{fr.translated}}\nES: {{es.translated}}",
+)
+
+chain = Chain(name="Translate & Summarise", steps=[[fr_branch, es_branch], agg])
+```
+
 ### Python Functions
 
 Inject pure Python functions with `apply`:
@@ -112,6 +133,25 @@ chain = Chain(
     steps=[qa_step, apply(filter_low_confidence)],
 )
 ```
+
+### Architecture Overview (v2 – Elegance refactor)
+
+Internally Chainette is now modelled as a **directed acyclic graph**:
+
+```
+inputs → Step/Apply → … → Branch(es) → outputs
+```
+
+Key runtime components:
+
+• `Graph` / `GraphNode` – tiny DATACLASS helpers to link nodes.<br/>
+• `Executor` – walks the graph depth-first, handles batching & engine reuse.<br/>
+• `AsyncExecutor` – same but with an `async def run` using `anyio` threads.<br/>
+• `EnginePool` – LRU cache of live vLLM / Ollama engines.<br/>
+• `Result` – wrapper object to propagate either a `value` **or** an `error`.
+
+You still build chains exactly the same way; `Chain.run()` now proxies to the
+executor under the hood, so existing code doesn't change.
 
 ## CLI Usage
 
@@ -158,6 +198,7 @@ Each run creates:
 Check the `examples/` directory:
 - `product_struct_extract.py`: Extract product attributes with translations
 - `multi_doc_summary_eval.py`: Document summarization with quality scoring
+- `join/inc_dec_join.py`: Tiny pure-Python Join demo (no LLM needed)
 
 ## Requirements
 

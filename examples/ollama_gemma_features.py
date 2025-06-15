@@ -59,7 +59,7 @@ filter_node = apply(filter_high_confidence, input_model=QAOut, output_model=QAOu
 
 # Translation Steps (parallel branches)
 fr_translate = Step(
-    id="fr",
+    id="fr_trans",
     name="Translate to French",
     input_model=QAOut,
     output_model=Translation,
@@ -70,7 +70,7 @@ fr_translate = Step(
 )
 
 es_translate = Step(
-    id="es",
+    id="es_trans",
     name="Translate to Spanish",
     input_model=QAOut,
     output_model=Translation,
@@ -80,34 +80,23 @@ es_translate = Step(
     user_prompt="Translate into Spanish the sentence: 'The answer to the question \"{{chain_input.text}}\" is {{qa.answer}}.'",
 )
 
-translation_branch_fr = Branch(name="fr_branch", steps=[fr_translate])
-translation_branch_es = Branch(name="es_branch", steps=[es_translate])
+translation_branch_fr = Branch(name="fr_branch", steps=[fr_translate]).join("fr")
+translation_branch_es = Branch(name="es_branch", steps=[es_translate]).join("es")
 
-# Verification step that echoes translations combined (context usage)
-summary_step_fr = Step(
-    id="summary_fr",
-    name="Summary FR",
-    input_model=Translation,
-    output_model=Summary,
+# Aggregator step consumes joined translations
+class DualSummary(BaseModel):
+    summary: str
+
+aggregator_step = Step(
+    id="agg",
+    name="Aggregator",
+    input_model=Translation,  # dummy, we will feed same QAOut but rely on histories
+    output_model=DualSummary,
     engine_name="gemma_ollama",
     sampling=SamplingParams(temperature=0.0),
     system_prompt="Return JSON with key 'summary'.",
-    user_prompt="{{fr.translated}}",
+    user_prompt="Compare French: {{fr.translated}}\nSpanish: {{es.translated}}",
 )
-summary_step_es = Step(
-    id="summary_es",
-    name="Summary ES",
-    input_model=Translation,
-    output_model=Summary,
-    engine_name="gemma_ollama",
-    sampling=SamplingParams(temperature=0.0),
-    system_prompt="Return JSON with key 'summary'.",
-    user_prompt="{{es.translated}}",
-)
-
-# Replace previous append lines
-translation_branch_fr.steps.append(summary_step_fr)
-translation_branch_es.steps.append(summary_step_es)
 
 # ------------------------------------------------------------------ #
 # Chain definition
@@ -117,6 +106,7 @@ full_chain = Chain(
     steps=[
         qa_step,
         filter_node,
-        [translation_branch_fr, translation_branch_es],  # Parallel branches
+        [translation_branch_fr, translation_branch_es],  # Parallel branches with join
+        aggregator_step,
     ],
 ) 

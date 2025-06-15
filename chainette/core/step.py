@@ -7,12 +7,10 @@ objects into a list of *output_model* objects.
 """
 
 from typing import List, Tuple, Type, Any, Optional, Dict
-import json
 
 from pydantic import BaseModel
 from transformers import AutoTokenizer
 
-from chainette.utils.templates import render
 from chainette.engine.registry import get_engine_config
 from chainette.core.node import Node
 from chainette.io.writer import RunWriter
@@ -21,6 +19,7 @@ from chainette.utils.json_schema import generate_json_output_prompt
 from vllm import SamplingParams
 from vllm.sampling_params import GuidedDecodingParams
 from chainette.utils.prompt import build_prompt
+from chainette.utils.parsing import parse_llm_json
 from chainette.engine.pool import ENGINE_POOL
 
 __all__ = [
@@ -79,103 +78,58 @@ class Step(Node):
         guided_params = GuidedDecodingParams(json=json_schema)
         self.sampling.guided_decoding = guided_params
 
-    def _build_prompt(self, item_history: Dict[str, Any]) -> str:
-        return build_prompt(self, item_history)
-
-    def _parse_output(self, llm_output: Any) -> Tuple[BaseModel, Optional[str]]:
-        first_completion = llm_output.outputs[0]
-        text = first_completion.text.strip()
-        print(f"DEBUG: Raw LLM-output text: {text}")
-        reasoning_content: Optional[str] = None
-        if hasattr(first_completion, "reasoning"):
-            reasoning_content = str(first_completion.reasoning)
-        elif hasattr(first_completion, "reasoning_content"):
-            reasoning_content = str(first_completion.reasoning_content)
-
-        try:
-            data = json.loads(text)
-            obj = self.output_model.model_validate(data)
-            return obj, reasoning_content
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON output from '{self.engine_name}' for step '{self.id}': {text}. Error: {e}")
-        except Exception as exc:
-            raise ValueError(f"Failed to validate output for step '{self.id}': {exc}\nModel: {self.engine_name}\nOutput: {text}")
-
     def execute(
         self,
         inputs: List[BaseModel],
         item_histories: List[Dict[str, Any]],
         writer: RunWriter | None = None,
         debug: bool = False,
-        batch_size: int = 0, # Default to 0 means no batching or handle full list
+        batch_size: int = 0,  # Kept for API-compat but now ignored – batching handled by Executor
     ) -> Tuple[List[BaseModel], List[Dict[str, Any]]]:
         if len(inputs) != len(item_histories):
             raise ValueError("Mismatch between number of inputs and item_histories in Step.execute")
 
+        # Lazily fetch engine & tokenizer (if needed)
         cfg = get_engine_config(self.engine_name)
         if self.engine is None:
             self.engine = ENGINE_POOL.acquire(self.engine_name)
-            if getattr(cfg, "backend", "vllm") != "ollama":
-                if self.tokenizer is None:
-                    self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
+            if getattr(cfg, "backend", "vllm") != "ollama" and self.tokenizer is None:
+                self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
 
-        all_parsed_outputs: List[BaseModel] = []
-        all_new_item_histories: List[Dict[str, Any]] = []
-
-        # Determine actual batch_size: if 0 or less, or larger than inputs, process all at once
-        effective_batch_size = batch_size if batch_size > 0 and batch_size < len(inputs) else len(inputs)
-        if effective_batch_size == 0 and len(inputs) > 0: # handle case where inputs might be empty
-             effective_batch_size = len(inputs)
-        elif len(inputs) == 0:
+        if not inputs:
             return [], []
 
+        prompts = [build_prompt(self, hist) for hist in item_histories]
 
-        for i in range(0, len(inputs), effective_batch_size):
-            batch_inputs = inputs[i:i + effective_batch_size]
-            batch_item_histories = item_histories[i:i + effective_batch_size]
+        if debug and prompts:
+            print(f"STEP {self.id}: generating {len(prompts)} prompt(s). Sample prompt:\n{prompts[0][:500]}…")
 
-            prompts = [self._build_prompt(hist) for hist in batch_item_histories]
+        raw_outputs = self.engine.generate(prompts=prompts, sampling_params=self.sampling)
 
-            if debug:
-                print(f"DEBUG: Step '{self.id}' processing batch {i // effective_batch_size + 1} with {len(batch_inputs)} items.")
-                # Optionally print one prompt from the batch for brevity
-                if prompts:
-                    print(f"DEBUG: Sample prompt from batch: {prompts[0][:500]}...") # Print first 500 chars
+        parsed_outputs: List[BaseModel] = []
+        new_histories: List[Dict[str, Any]] = []
 
-            outputs_raw_batch = self.engine.generate(prompts=prompts, sampling_params=self.sampling)
+        for hist, raw in zip(item_histories, raw_outputs):
+            try:
+                parsed, reasoning = parse_llm_json(
+                    self.output_model,
+                    raw,
+                    engine_name=self.engine_name,
+                    step_id=self.id,
+                )
+                parsed_outputs.append(parsed)
 
-            batch_parsed_outputs: List[BaseModel] = []
-            batch_new_item_histories: List[Dict[str, Any]] = []
+                h = hist.copy()
+                if self.yield_output:
+                    h[self.id] = parsed
+                if reasoning:
+                    h[f"{self.id}_reasoning"] = reasoning
+                new_histories.append(h)
+            except ValueError as e:
+                print(f"Warning: skipping item in step '{self.id}' due to parse error: {e}")
+                new_histories.append(hist.copy())
 
-            for j, raw_out in enumerate(outputs_raw_batch):
-                original_item_history = batch_item_histories[j]
-                try:
-                    parsed_output, reasoning = self._parse_output(raw_out)
-                    batch_parsed_outputs.append(parsed_output)
-                    
-                    # Update history for this item
-                    updated_history = original_item_history.copy()
-                    if self.yield_output:
-                        updated_history[self.id] = parsed_output
-                    if reasoning:
-                        updated_history[f"{self.id}_reasoning"] = reasoning
-                    batch_new_item_histories.append(updated_history)
+        if writer is not None and self.yield_output and parsed_outputs:
+            writer.write_step(self.id, parsed_outputs)
 
-                except ValueError as e:
-                    print(f"Warning: Skipping item due to parsing/validation error in step '{self.id}': {e}")
-                    # Append original history if output is skipped, or decide on error handling
-                    batch_new_item_histories.append(original_item_history.copy()) 
-                    # Optionally, append a placeholder or error object to batch_parsed_outputs
-                    # For now, we just skip adding to batch_parsed_outputs for this item
-
-            all_parsed_outputs.extend(batch_parsed_outputs)
-            all_new_item_histories.extend(batch_new_item_histories)
-
-            if writer is not None and self.yield_output and batch_parsed_outputs:
-                # Write only the successfully parsed outputs of the current batch
-                writer.write_step(self.id, batch_parsed_outputs)
-                if debug:
-                    print(f"DEBUG: Step '{self.id}' wrote {len(batch_parsed_outputs)} outputs for batch {i // effective_batch_size + 1} to writer.")
-        
-        # The writer.finalize() will be called at the end of the Chain.run()
-        return all_parsed_outputs, all_new_item_histories
+        return parsed_outputs, new_histories

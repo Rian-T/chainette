@@ -1,0 +1,11 @@
+{
+  "execution_info": {
+    "chain_name": "Gemma QA",
+    "run_dir": "/Users/rtouchen/dev/chainette/run_gemma3"
+  },
+  "format": "jsonl",
+  "generated_by": "chainette v0.1.0",
+  "splits": [
+    "qa"
+  ]
+}

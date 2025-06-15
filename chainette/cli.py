@@ -258,5 +258,51 @@ def run(
         console.print(f"[dim]{traceback.format_exc()}[/dim]")
         raise typer.Exit(code=1)
 
+# --------------------------------------------------------------------------- #
+# YAML runner
+# --------------------------------------------------------------------------- #
+
+from chainette.yaml_loader import load_chain as _load_chain_yaml
+
+
+@app.command("run-yaml")
+def run_yaml(
+    yaml_file: Path = typer.Argument(..., help="YAML chain file", exists=True, file_okay=True, dir_okay=False),
+    output_dir: Path = typer.Argument(..., help="Output directory", dir_okay=True, file_okay=False, writable=True, resolve_path=True),
+    generate_flattened: bool = typer.Option(True, "--flattened/--no-flattened"),
+    max_lines_per_file: int = typer.Option(1000),
+    symbols_module: str = typer.Option("examples.ollama_gemma_features", help="Python module with step/branch symbols"),
+):
+    """Run a chain defined in YAML."""
+    console.print(f"[cyan]Running YAML chain from {yaml_file}…[/]")
+
+    syms_mod = importlib.import_module(symbols_module)
+    chain_obj = _load_chain_yaml(yaml_file, symbols=syms_mod.__dict__)
+
+    # Collect first step's input model for hint
+    first = chain_obj.steps[0]
+    console.print(f"Chain '[bold]{chain_obj.name}[/]' loaded with {len(chain_obj.steps)} top-level steps.")
+
+    # For demo just use inputs.jsonl in cwd if exists
+    input_path = Path("inputs2.jsonl")
+    if not input_path.exists():
+        console.print("[red]inputs2.jsonl not found – create one or enhance CLI with explicit flag.[/]")
+        raise typer.Exit(1)
+
+    import json
+    inputs = [json.loads(l) for l in input_path.read_text().splitlines() if l]
+    # naive model construction
+    from pydantic import BaseModel
+
+    model_cls = first.input_model if isinstance(first, Node) else None  # type: ignore[attr-defined]
+    if not model_cls:
+        console.print("[red]Cannot infer input model.[/]")
+        raise typer.Exit(1)
+
+    pyd_inputs = [model_cls.model_validate(obj) for obj in inputs]
+    chain_obj.run(pyd_inputs, output_dir=output_dir, generate_flattened_output=generate_flattened, max_lines_per_file=max_lines_per_file)
+
+    console.print("[green]YAML chain finished.[/]")
+
 if __name__ == "__main__":
     app() 

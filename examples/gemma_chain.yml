@@ -1,0 +1,7 @@
+name: Gemma YAML Chain
+batch_size: 1
+steps:
+  - examples.ollama_gemma_features:qa_step
+  - examples.ollama_gemma_features:filter_node
+  - - examples.ollama_gemma_features:translation_branch_fr
+    - examples.ollama_gemma_features:translation_branch_es 

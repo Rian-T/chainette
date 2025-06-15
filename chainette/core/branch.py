@@ -59,3 +59,9 @@ class Branch(CompositeNode):  # noqa: D101
         
         if debug:
             print(f"DEBUG: Branch '{self.name}' execution finished.")
+
+    # Fluent helper ---------------------------------------------------- #
+    def join(self, alias: str):  # noqa: D401
+        """Return a JoinBranch that will merge outputs under *alias*."""
+        from .join_branch import JoinBranch  # local import to avoid cycle
+        return JoinBranch(alias, name=self.name, steps=self.steps)
