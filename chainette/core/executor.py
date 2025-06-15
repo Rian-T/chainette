@@ -123,4 +123,106 @@ class Executor:  # noqa: D101
             if last_step_obj is not None:
                 last_step_obj.engine = None  # pyright: ignore[reportGeneralTypeIssues]
 
-        return histories 
+        return histories
+
+    # ------------------------------------------------------------------ #
+    def run_iter(
+        self,
+        inputs: List[BaseModel],
+        writer: RunWriter,
+        debug: bool = False,
+    ):
+        """Yield dictionaries for each processed batch.
+
+        Emitted structure: {"step_id": str, "batch_no": int, "outputs": list, "histories": list}
+        Consumers may ignore or store these as needed.  This keeps memory low
+        for very large datasets while still allowing downstream streaming.
+        """
+
+        histories: List[Dict[str, Any]] = [
+            {"chain_input": inp} for inp in inputs
+        ]
+
+        nodes = self.graph.nodes()
+
+        active_engine_name: str | None = None
+        last_step_obj: Step | None = None
+
+        for n in nodes:
+            obj = n.ref
+
+            entering_branch = isinstance(obj, Branch)
+            upcoming_engine = (
+                obj.engine_name if isinstance(obj, Step) else None  # type: ignore[attr-defined]
+            )
+
+            if active_engine_name and (
+                entering_branch or (upcoming_engine and upcoming_engine != active_engine_name)
+            ):
+                get_engine_config(active_engine_name).release_engine()
+                if last_step_obj is not None:
+                    last_step_obj.engine = None
+                active_engine_name = None
+                last_step_obj = None
+
+            if isinstance(obj, Step):
+                bs = self.batch_size if self.batch_size > 0 else len(inputs)
+                batch_no = 0
+                new_inputs: List[BaseModel] = []
+                new_histories: List[Dict[str, Any]] = []
+
+                for start in range(0, len(inputs), bs):
+                    end = start + bs
+                    batch_inp = inputs[start:end]
+                    batch_hist = histories[start:end]
+
+                    publish(BatchStarted(step_id=obj.id, batch_no=batch_no, count=len(batch_inp)))
+
+                    outs, hist_out = obj.execute(batch_inp, batch_hist, writer, debug=debug)
+
+                    publish(BatchFinished(step_id=obj.id, batch_no=batch_no, count=len(outs)))
+
+                    if outs:
+                        new_inputs.extend(outs)
+                        new_histories.extend(hist_out)
+                    else:
+                        new_inputs.extend(batch_inp)
+                        new_histories.extend(batch_hist)
+
+                    yield {
+                        "step_id": obj.id,
+                        "batch_no": batch_no,
+                        "outputs": outs,
+                        "histories": hist_out,
+                    }
+
+                    # encourage GC
+                    del batch_inp, batch_hist, outs, hist_out
+
+                    batch_no += 1
+
+                inputs = new_inputs
+                histories = new_histories
+
+                active_engine_name = obj.engine_name
+                last_step_obj = obj
+
+                # Clear to free memory earlier
+                del new_inputs, new_histories
+
+            else:
+                # Fallback to original logic for non-Step
+                inputs, histories = obj.execute(inputs, histories, writer, debug=debug)
+
+        # release engine end
+        if active_engine_name:
+            get_engine_config(active_engine_name).release_engine()
+            if last_step_obj is not None:
+                last_step_obj.engine = None
+
+        yield {
+            "step_id": "_end_",
+            "batch_no": -1,
+            "outputs": inputs,
+            "histories": histories,
+        } 
