@@ -42,7 +42,60 @@ Key ideas:
 
 - [ ] **Design docs** – detail StreamWriter & EventBus API + LOC budget (<120 LOC combined).
 - Executor
-  - [x] Refactor `Executor.run` to *yield batches* instead of returning full lists (added `run_iter`).
-  - [x] Release references to processed batches (`del` → encourage GC).
+  - [ ] Refactor `Executor.run` to *yield batches* instead of returning full lists.
+  - [ ] Release references to processed batches (`del` → encourage GC).
 - StreamWriter
-  - [x] Implement incremental write with rolling filenames `
+  - [x] Implement incremental write with rolling filenames `000.jsonl`, `001.jsonl`, … per split.
+  - [x] Add Parquet support via `pyarrow` (optional extra).
+  - [x] Implement `flatten_row(batch_dict)` generator so flattening never loads full datasets (handled in StreamWriter).
+  - [x] Unit tests: basic jsonl & parquet chunking (RAM stress test pending).
+- EventBus / Logger
+  - [x] Tiny `events.py` with `@dataclass` events + `subscribe/publish` helpers.
+  - [ ] Logger module v2: rich `Tree`, per-step `Progress`, coloured levels.
+  - [ ] CLI: `chainette run` prints DAG tree then live progress.
+  - [ ] Add `--quiet` & `--json-logs` flags.
+- CLI & Config
+  - [x] New `--stream-writer` flag defaults *on* when batch_size > 0 (basic flag added; default logic pending).
+  - [ ] `chainette inspect` to display tree only (no run).
+- Docs
+  - [ ] Add *Runner* section in README & snippet in `llm.txt`.
+- Examples
+  - [ ] `examples/runner/huge_batch_demo.py` (uses dummy apply nodes to process 1 M rows quickly).
+- Tests
+  - [ ] Stress test: pytest benchmarks memory under 512 MB for 1 M rows.
+  - [ ] Snapshot test of DAG tree output (rich console capture).
+- Developer Workflow Checklist (for each TODO)
+  1. `poetry install -E ollama`
+  2. Ensure `ollama serve` running.
+  3. After each completed item:
+     ```bash
+     poetry run chainette run examples/ollama_gemma_features.py full_chain inputs2.jsonl _tmp_run_runner
+     pytest -q
+     ```
+  4. Inspect `_tmp_run_runner/flattened/*.jsonl` for correctness.
+  5. Commit with a code snippet under the checked item.
+
+    Example snippet placeholder:
+    ```python
+    # core/executor.py (excerpt)
+    for batch in _iter_batches(inputs, self.batch_size):
+        yield self._run_batch(batch)
+    ```
+
+## 4 – LOC Budget
+
+| Module | Max LOC |
+|--------|---------|
+|core/executor.py (diff)| +40 |
+|io/stream_writer.py | ≤120 |
+|utils/events.py | ≤40 |
+|utils/logging_v2.py | ≤80 |
+|cli.py (diff) | +50 |
+
+## 5 – Acceptance Criteria
+
+1. Running `huge_batch_demo.py` with 1 M rows uses <500 MB RAM.
+2. Files are chunked correctly (`000.jsonl`, `001.jsonl`, …).
+3. Flattened output for join chains passes schema validation.
+4. Console shows DAG tree + live progress matching DataTrove style.
+5. All existing tests + new tests pass: `pytest -q`. 
