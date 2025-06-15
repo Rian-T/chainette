@@ -107,5 +107,6 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
    ```bash
    poetry run chainette run examples/ollama_gemma_features.py full_chain inputs2.jsonl _tmp_run
    ```
-   (Expect JSON outputs in `_tmp_run/`.)
+   - Expect to see DEBUG lines and final success message.
+   - Inspect `_tmp_run/fr_branch/0.jsonl` etc. for translations.
 4. If test fails, fix before progressing to next TODO.
