@@ -62,7 +62,7 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
 - Branch composite
   - [x] Refactor `Branch` → subclass `CompositeNode` in ≤40 LOC.
 - Execution engine
-  - [ ] Create `executor.py` (≤150 LOC) with generic DAG walker.
+  - [x] Create `executor.py` (≤150 LOC) with generic DAG walker.
   - [ ] Batching/engine-reuse logic lives here; Step becomes thin wrapper.
 - Prompt renderer
   - [ ] `prompt.py` (≤80 LOC) – pure functions, no side-effects.
@@ -99,20 +99,3 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
   - [ ] Add validation against JSON-Schema.
   - [ ] Support joins/branch IDs explicitly (`join_on="id"`).
   - [ ] Maintain backwards-compat with `
-
-## 5 – Open Questions / Risks
-
-| Topic | Concern | Mitigation |
-|-------|---------|-----------|
-|YAML loader|YAML can be verbose / error-prone and may bloat code > target LOC.|Keep loader optional; fail fast with schema validation; reuse `ruamel.yaml` only if needed.|
-|Operator DSL magic|Over-using `__rrshift__`/`__or__` may confuse users.|Provide clear docs + fall back to explicit `connect()` API.|
-|Concurrency|Async executor adds complexity.|Ship synchronous path first; async as opt-in feature.|
-|Security|Arbitrary YAML could execute tags.|Disable YAML tags; validate strictly.|
-|Performance|LRU EnginePool may thrash for large DAGs.|Expose pool size option; benchmark.|
-
-## 6 – Missing Items (added)
-
-- Streaming token support in Executor (optional, maintain small code by callback hooks).
-- Metrics / tracing: expose simple event hooks (start/end node) for latency measurement (<40 LOC).
-- Error handling strategy: propagate structured errors, allow retry policy node (future work).
-- CLI sub-command `chainette graph` to visualise DAG via Mermaid export.
