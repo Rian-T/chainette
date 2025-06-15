@@ -42,10 +42,16 @@ class Chain:
         fmt: str = "jsonl",
         generate_flattened_output: bool = True,
         max_lines_per_file: int = 1000,
+        stream_writer: bool = False,
         debug: bool = False,
     ):
         """Execute the chain and write results to *output_dir*."""
-        writer = RunWriter(Path(output_dir), max_lines_per_file=max_lines_per_file, fmt=fmt)
+        if stream_writer:
+            from chainette.io.stream_writer import StreamWriter  # noqa: WPS433
+
+            writer = StreamWriter(Path(output_dir), max_lines_per_file=max_lines_per_file, fmt=fmt)
+        else:
+            writer = RunWriter(Path(output_dir), max_lines_per_file=max_lines_per_file, fmt=fmt)
         writer.set_chain_name(self.name)
 
         # ---- Build Graph from linear steps list ---------------------------------

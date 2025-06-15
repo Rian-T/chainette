@@ -16,6 +16,7 @@ from .branch import Branch
 from .join_branch import JoinBranch
 from ..io.writer import RunWriter
 from ..engine.registry import get_engine_config
+from chainette.utils.events import publish, BatchStarted, BatchFinished
 
 __all__ = ["Executor"]
 
@@ -69,12 +70,17 @@ class Executor:  # noqa: D101
 
                 # Run in mini-batches managed here (Step ignores batch_size arg)
                 bs = self.batch_size if self.batch_size > 0 else len(inputs)
+                batch_no = 0
                 for start in range(0, len(inputs), bs):
                     end = start + bs
                     batch_inp = inputs[start:end]
                     batch_hist = histories[start:end]
 
+                    publish(BatchStarted(step_id=obj.id, batch_no=batch_no, count=len(batch_inp)))
+
                     outs, hist_out = obj.execute(batch_inp, batch_hist, writer, debug=debug)
+
+                    publish(BatchFinished(step_id=obj.id, batch_no=batch_no, count=len(outs)))
 
                     # Fallback: when parsing fails, Step may return fewer outputs.
                     # In that case, keep original inputs/histories aligned.
@@ -84,6 +90,8 @@ class Executor:  # noqa: D101
                     else:
                         new_inputs.extend(batch_inp)
                         new_histories.extend(batch_hist)
+
+                    batch_no += 1
 
                 inputs = new_inputs
                 histories = new_histories

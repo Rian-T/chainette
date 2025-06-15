@@ -3,7 +3,7 @@ Project Name: Chainette
 
 Purpose & Philosophy
 --------------------
-1. Goal: Provide a tiny (<~350 LOC) but powerful, **type-safe** framework to compose reproducible LLM pipelines in Python.
+1. Goal: Provide a tiny but powerful, **type-safe** framework to compose reproducible LLM pipelines in Python.
 2. Principles:
    • Strictly typed data-flow with Pydantic models for every input/output → eliminates fragile string parsing.
    • Prompt engineering + schema enforcement via **guided JSON decoding** (vLLM GuidedDecodingParams) ensures models must comply with declared schema.

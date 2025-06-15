@@ -186,7 +186,8 @@ def run(
     input_file: Path = typer.Argument(..., help="Path to the input JSONL file (each line is a Pydantic model for the first step).", exists=True, file_okay=True, dir_okay=False, readable=True),
     output_dir: Path = typer.Argument(..., help="Directory to save the output datasets.", file_okay=False, dir_okay=True, writable=True, resolve_path=True),
     generate_flattened: bool = typer.Option(True, "--flattened/--no-flattened", help="Generate a single flattened output file."),
-    max_lines_per_file: int = typer.Option(1000, help="Maximum lines per output data file.")
+    max_lines_per_file: int = typer.Option(1000, help="Maximum lines per output data file."),
+    stream_writer: bool = typer.Option(False, "--stream-writer/--no-stream-writer", help="Use the new incremental StreamWriter."),
 ):
     """Run a chain with inputs from a JSONL file and save results."""
     console.print(f"[cyan]Running chain '{chain_name}' from {chain_file}...[/]")
@@ -243,6 +244,16 @@ def run(
 
     try:
         console.print(f"Executing chain. Output will be saved to: {output_dir}")
+        # Prepare writer (legacy or streaming)
+        if stream_writer:
+            from chainette.io.stream_writer import StreamWriter  # noqa: WPS433
+
+            writer = StreamWriter(output_dir, max_lines_per_file=max_lines_per_file, fmt="jsonl")
+        else:
+            from chainette.io.writer import RunWriter
+
+            writer = RunWriter(output_dir, max_lines_per_file=max_lines_per_file, fmt="jsonl")
+
         chain_obj.run(
             inputs=inputs_data,
             output_dir=output_dir,
