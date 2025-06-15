@@ -95,7 +95,7 @@ aggregator_step = Step(
     engine_name="gemma_ollama",
     sampling=SamplingParams(temperature=0.0),
     system_prompt="Return JSON with key 'summary'.",
-    user_prompt="Compare French: {{fr.translated}}\nSpanish: {{es.translated}}",
+    user_prompt="Compare French: {{fr.translated or fr.answer}}\nSpanish: {{es.translated or es.answer}}",
 )
 
 # ------------------------------------------------------------------ #
