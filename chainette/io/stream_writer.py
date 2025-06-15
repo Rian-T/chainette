@@ -27,6 +27,15 @@ from pydantic import BaseModel
 from chainette.utils.ids import snake_case
 from chainette.utils.events import publish, BatchFinished
 
+# Optional pyarrow import for Parquet support – keeps dependency lightweight
+try:
+    import pyarrow as pa  # type: ignore
+    import pyarrow.parquet as pq  # type: ignore
+
+    _HAS_PARQUET = True
+except ModuleNotFoundError:  # pragma: no cover
+    _HAS_PARQUET = False
+
 __all__ = ["StreamWriter"]
 
 
@@ -51,6 +60,10 @@ class StreamWriter:  # noqa: D101
         self._line_counts: Dict[str, int] = {}
         self._file_numbers = {k: count(0) for k in []}  # lazily created
 
+        # For parquet buffered writing
+        if self.fmt == "parquet":
+            self._buffers: Dict[str, List[Dict[str, Any]]] = {}
+
         # For flattened streaming
         if self.flattened:
             flat_dir = self.root / "flattened"
@@ -74,9 +87,10 @@ class StreamWriter:  # noqa: D101
         if self.fmt == "jsonl":
             return open(fp, "w", encoding="utf-8")
         else:  # parquet deferred – for now create placeholder handle
-            import pyarrow.parquet as pq  # type: ignore
-
-            return pq.ParquetWriter(str(fp), schema=Features({}).arrow_schema)  # type: ignore[arg-type]
+            if _HAS_PARQUET:
+                return pq.ParquetWriter(str(fp), schema=Features({}).arrow_schema)  # type: ignore[arg-type]
+            else:
+                raise RuntimeError("Parquet support not available")
 
     def _handle_for(self, split: str) -> IO:
         h = self._handles.get(split)
@@ -95,26 +109,37 @@ class StreamWriter:  # noqa: D101
         if not records:
             return
         split = snake_case(step_id)
-        handle = self._handle_for(split)
+        if self.fmt == "jsonl":
+            handle = self._handle_for(split)
 
-        for rec in records:
-            row = rec.model_dump(mode="json") if isinstance(rec, BaseModel) else rec
-            if self.fmt == "jsonl":
+            for rec in records:
+                row = rec.model_dump(mode="json") if isinstance(rec, BaseModel) else rec
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-            else:
-                raise NotImplementedError("parquet not yet implemented in StreamWriter")
 
-            # Flatten on the fly if enabled
-            if self.flattened:
-                self._write_flat_row(split, row)
+                if self.flattened:
+                    self._write_flat_row(split, row)
 
-            # Roll file if needed
-            self._line_counts[split] += 1
-            if self._line_counts[split] >= self.max_lines:
-                handle.close()
-                self._handles.pop(split)
-                # next call will open a new file
-                self._line_counts[split] = 0
+                self._line_counts[split] += 1
+                if self._line_counts[split] >= self.max_lines:
+                    handle.close()
+                    self._handles.pop(split)
+                    self._line_counts[split] = 0
+
+        elif self.fmt == "parquet":
+            if not _HAS_PARQUET:
+                raise RuntimeError("pyarrow not installed – install to use parquet output")
+            buf = self._buffers.setdefault(split, [])  # type: ignore[attr-defined]
+            for rec in records:
+                row = rec.model_dump(mode="json") if isinstance(rec, BaseModel) else rec
+                buf.append(row)
+                if self.flattened:
+                    self._write_flat_row(split, row)
+
+                if len(buf) >= self.max_lines:
+                    self._flush_parquet_buffer(split)
+
+        else:
+            raise ValueError(f"Unsupported format {self.fmt}")
 
         publish(BatchFinished(step_id=step_id, batch_no=-1, count=len(records)))
 
@@ -143,6 +168,10 @@ class StreamWriter:  # noqa: D101
             self._flat_handle.close()
             self._flat_handle = None
 
+        if self.fmt == "parquet" and _HAS_PARQUET:
+            for split in list(getattr(self, "_buffers", {}).keys()):
+                self._flush_parquet_buffer(split)
+
     def __enter__(self):
         return self
 
@@ -160,4 +189,23 @@ class StreamWriter:  # noqa: D101
 
     def set_chain_name(self, name: str):  # noqa: D401
         """Legacy no-op (kept for interface parity)."""
-        return None 
+        return None
+
+    # ------------------------------------------------------------------ #
+    # Parquet helpers
+    # ------------------------------------------------------------------ #
+
+    def _flush_parquet_buffer(self, split: str):
+        if not _HAS_PARQUET:
+            return
+        buf: List[Dict[str, Any]] = self._buffers.get(split, [])  # type: ignore[attr-defined]
+        if not buf:
+            return
+        idx = self._file_numbers.setdefault(split, count(0))
+        file_idx = next(idx)
+        dir_ = self.root / split
+        dir_.mkdir(parents=True, exist_ok=True)
+        fp = dir_ / f"{file_idx:03d}.parquet"
+        table = pa.Table.from_pylist(buf)
+        pq.write_table(table, fp)
+        buf.clear() 
