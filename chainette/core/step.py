@@ -100,13 +100,15 @@ class Step(Node):
         if not messages:
             return ""
             
-        # Ensure tokenizer is initialized
-        if self.tokenizer is None:
-            cfg = get_engine_config(self.engine_name)
-            self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
+        cfg = get_engine_config(self.engine_name)
+
+        # For vLLM backend we need tokenizer chat template
+        if getattr(cfg, "backend", "vllm") != "ollama":
+            # Ensure tokenizer is initialized
+            if self.tokenizer is None:
+                self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
 
         # If using Ollama backend, return simple concatenated prompt (Ollama understands role tags)
-        cfg = get_engine_config(self.engine_name)
         if getattr(cfg, "backend", "vllm") == "ollama":
             prompt_lines = []
             for m in messages:
@@ -155,8 +157,9 @@ class Step(Node):
         cfg = get_engine_config(self.engine_name)
         if self.engine is None:
             self.engine = cfg.engine
-            # Re-initialize tokenizer whenever engine is initialized
-            self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
+            if getattr(cfg, "backend", "vllm") != "ollama":
+                # Re-initialize tokenizer for vLLM backend
+                self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
 
         all_parsed_outputs: List[BaseModel] = []
         all_new_item_histories: List[Dict[str, Any]] = []
