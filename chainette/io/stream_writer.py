@@ -147,4 +147,17 @@ class StreamWriter:  # noqa: D101
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.close() 
+        self.close()
+
+    # ------------------------------------------------------------------ #
+    # Compatibility stubs with legacy RunWriter API
+    # ------------------------------------------------------------------ #
+
+    def add_node_to_graph(self, node_info: dict[str, Any]):  # noqa: D401
+        """Legacy no-op: StreamWriter does not store the exec graph yet."""
+        # TODO: persist lightweight execution graph as line-delimited JSON.
+        return None
+
+    def set_chain_name(self, name: str):  # noqa: D401
+        """Legacy no-op (kept for interface parity)."""
+        return None 
