@@ -18,7 +18,7 @@ from chainette import Step, Chain, SamplingParams, register_engine
 register_engine(
     name="qwen_ollama",
     backend="ollama",
-    model="Qwen/Qwen2.5-1.5B-Instruct",  # Identifier used by both HF & Ollama
+    model="qwen2.5-instruct",  # Ollama model name
 )
 
 # 2. Define schemas

@@ -5,7 +5,8 @@ This class provides a minimal `.generate` method compatible with
 `chainette.core.step.Step`, returning objects that expose the same
 attributes used in `_parse_output` (in particular `outputs[0].text`).
 It relies on the official `ollama` Python package which communicates with
-an Ollama server running locally (or via the `OLLAMA_HOST` env var).
+an Ollama server running locally (or via the `OLLAMA_HOST` env var). Model
+names follow Ollama conventions (e.g. `qwen2.5-instruct`).
 
 Limitations:
 - Guided decoding is *not* enforced by Ollama – instead, Chainette still
