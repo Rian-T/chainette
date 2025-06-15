@@ -33,6 +33,9 @@ class QAOut(BaseModel):
 class Translation(BaseModel):
     translated: str
 
+class Summary(BaseModel):
+    summary: str
+
 # ------------------------------------------------------------------ #
 # Steps
 # ------------------------------------------------------------------ #
@@ -79,6 +82,22 @@ es_translate = Step(
 
 translation_branch_fr = Branch(name="fr_branch", steps=[fr_translate])
 translation_branch_es = Branch(name="es_branch", steps=[es_translate])
+
+# Verification step that echoes translations combined (context usage)
+summary_step = Step(
+    id="summary",
+    name="Echo summary",
+    input_model=Translation,
+    output_model=Summary,
+    engine_name="gemma_ollama",
+    sampling=SamplingParams(temperature=0.0),
+    system_prompt="Return JSON with key 'summary' repeating the input translation.",
+    user_prompt="{{chain_input.translated}}",
+)
+
+# Add summary step to each translation branch
+translation_branch_fr.steps.append(summary_step)
+translation_branch_es.steps.append(summary_step)
 
 # ------------------------------------------------------------------ #
 # Chain definition
