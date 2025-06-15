@@ -57,10 +57,10 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
 
 - [ ] **Design docs** – detailed diagrams + LOC budget for each new module.
 - Graph layer
-  - [ ] Introduce `graph.py` with `Node`, `Edge`, `Graph` (<120 LOC).
-  - [ ] Provide `.connect(node)` helper for fluent graph building.
+  - [x] Introduce `graph.py` with `Node`, `Edge`, `Graph` (<120 LOC).
+  - [x] Provide `.connect(node)` helper for fluent graph building.
 - Branch composite
-  - [ ] Refactor `Branch` → subclass `CompositeNode` in ≤40 LOC.
+  - [x] Refactor `Branch` → subclass `CompositeNode` in ≤40 LOC.
 - Execution engine
   - [ ] Create `executor.py` (≤150 LOC) with generic DAG walker.
   - [ ] Batching/engine-reuse logic lives here; Step becomes thin wrapper.
@@ -83,7 +83,7 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
   - [ ] Add `CONTRIBUTING.md` emphasising simplicity rule.
 - Tests
   - [ ] Unit tests for graph traversal, pooling, renderer.
-  - [ ] Integration tests: vLLM mock + Ollama Gemma path.
+  - [ ] Integration tests: Ollama Gemma chain covering Steps, Apply, Branches.
   - [ ] Static graph validation tests (model I/O compatibility).
 - Logging
   - [ ] Centralised structured logger with verbosity levels (<40 LOC).
@@ -96,4 +96,11 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
 3. No performance regression vs current implementation on 100-item batch.
 
 ---
-Next step: **detail design of `Graph` & execution engine** (PR 1). 
+Next step: **detail design of `Graph` & execution engine** (PR 1).
+
+### Integration Example
+Introduce `examples/ollama_gemma_features.py` demonstrating:
+• Multiple Steps
+• Apply function filtering
+• Parallel Branches (FR / ES translation)
+This serves as high-level regression test during refactor. 
