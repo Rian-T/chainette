@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Any, Type
 
 import typer
+import logging
 from rich.console import Console
 from rich.table import Table
 from pydantic import BaseModel
@@ -20,6 +21,10 @@ app = typer.Typer(
     help="CLI for Chainette: typed, lightweight LLM chaining.",
     add_completion=False,
 )
+
+# Suppress noisy INFO logs from deps before nice output unless user wants debug
+logging.getLogger().setLevel(logging.ERROR)
+
 console = Console()
 
 
@@ -245,7 +250,17 @@ def run(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        console.print(f"Executing chain. Output will be saved to: {output_dir}")
+        if not quiet:
+            from chainette.utils.banner import ChainetteBanner  # noqa: WPS433
+
+            ChainetteBanner(console=console).display()
+
+        console.print(
+            f"[bold]Chain:[/] {chain_obj.name} • [bold]Inputs:[/] {len(inputs_data)} • "
+            f"[bold]Output Dir:[/] {output_dir}",
+        )
+        console.print("")  # spacing
+
         # Prepare writer (legacy or streaming)
         if stream_writer:
             from chainette.io.stream_writer import StreamWriter  # noqa: WPS433
