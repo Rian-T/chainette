@@ -84,6 +84,7 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
 - Tests
   - [ ] Unit tests for graph traversal, pooling, renderer.
   - [x] Integration tests: Ollama Gemma chain covering Steps, Apply, Branches (`ollama_gemma_features.py`).
+  - [ ] Continuously expand `ollama_gemma_features.py` to cover each new feature (context vars, joins, YAML loader, etc.).
   - [ ] Static graph validation tests (model I/O compatibility).
 - Logging
   - [ ] Centralised structured logger with verbosity levels (<40 LOC).
