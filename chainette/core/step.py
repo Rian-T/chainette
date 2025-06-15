@@ -105,6 +105,17 @@ class Step(Node):
             cfg = get_engine_config(self.engine_name)
             self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
 
+        # If using Ollama backend, return simple concatenated prompt (Ollama understands role tags)
+        cfg = get_engine_config(self.engine_name)
+        if getattr(cfg, "backend", "vllm") == "ollama":
+            prompt_lines = []
+            for m in messages:
+                role = m["role"]
+                content = m["content"]
+                prompt_lines.append(f"## {role}\n{content}")
+            prompt_lines.append("## assistant\n")  # Indicate generation start
+            return "\n\n".join(prompt_lines)
+
         return self.tokenizer.apply_chat_template(
             messages,
             tokenize=False,
