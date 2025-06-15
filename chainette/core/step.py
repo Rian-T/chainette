@@ -21,6 +21,7 @@ from chainette.utils.json_schema import generate_json_output_prompt
 from vllm import SamplingParams
 from vllm.sampling_params import GuidedDecodingParams
 from chainette.utils.prompt import build_prompt
+from chainette.engine.pool import ENGINE_POOL
 
 __all__ = [
     "Step",
@@ -113,10 +114,10 @@ class Step(Node):
 
         cfg = get_engine_config(self.engine_name)
         if self.engine is None:
-            self.engine = cfg.engine
+            self.engine = ENGINE_POOL.acquire(self.engine_name)
             if getattr(cfg, "backend", "vllm") != "ollama":
-                # Re-initialize tokenizer for vLLM backend
-                self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
+                if self.tokenizer is None:
+                    self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
 
         all_parsed_outputs: List[BaseModel] = []
         all_new_item_histories: List[Dict[str, Any]] = []
