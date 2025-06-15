@@ -68,7 +68,11 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
   - [x] `prompt.py` (≤80 LOC) – pure functions, no side-effects.
   - [x] `context.py` (≤50 LOC) – builds rendering context from histories.
 - Engine pool
-  - [ ] `pool.py` (≤60 LOC) – context manager + simple LRU of live engines.
+  - [x] `pool.py` (≤60 LOC) – context manager + simple LRU of live engines.
+    ```python
+    from chainette.engine.pool import ENGINE_POOL
+    engine = ENGINE_POOL.acquire("gemma_ollama")
+    ```
 - Step refactor
   - [ ] Remove batching/prompt logic; delegate to renderer & executor.
   - [ ] Target ≤120 LOC total.
