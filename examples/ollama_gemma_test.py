@@ -26,7 +26,7 @@ qa_step = Step(
     engine_name="gemma_ollama",
     sampling=SamplingParams(temperature=0.2),
     system_prompt="Answer the user's question with a short factual answer.",
-    user_prompt="{{text}}",
+    user_prompt="{{chain_input.text}}",
 )
 
 qa_chain = Chain(name="Gemma QA", steps=[qa_step]) 
