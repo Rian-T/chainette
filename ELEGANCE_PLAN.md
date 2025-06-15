@@ -89,27 +89,30 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
   - [ ] Centralised structured logger with verbosity levels (<40 LOC).
 - DSL / Builder
   - [ ] Design a fluent DSL for pipeline construction (e.g. `qa >> filter >> (fr | es)`).
-  - [ ] Support declarative joins and branch IDs (inspired by NoSQL joins / Airflow syntax).
-  - [ ] Maintain backwards-compat with `steps=[...]` list form.
+  - [ ] Evaluate two syntaxes:
+      1. **Operator DSL** (`>>`, `|`) pure-Python, no new deps.
+      2. **Declarative dict/YAML** for data-driven chains (good for CLI).
+  - [ ] Prototype operator DSL with minimal metaprogramming (<40 LOC).
+  - [ ] Prototype YAML loader that converts to `Graph` (<60 LOC).
+  - [ ] Define YAML schema (engines, models, steps, branches) & example file.
+  - [ ] Extend CLI: `chainette run-yaml my_chain.yml -o out_dir`.
+  - [ ] Add validation against JSON-Schema.
+  - [ ] Support joins/branch IDs explicitly (`join_on="id"`).
+  - [ ] Maintain backwards-compat with `
 
-*(Line counts are soft caps to enforce minimalism.)*
+## 5 – Open Questions / Risks
 
-## 4 – Acceptance Criteria
-1. All existing examples (`ollama_gemma_test`, `product_struct_extract`, etc.) still run unchanged.
-2. Code coverage for new core ≥ 80 %.
-3. No performance regression vs current implementation on 100-item batch.
+| Topic | Concern | Mitigation |
+|-------|---------|-----------|
+|YAML loader|YAML can be verbose / error-prone and may bloat code > target LOC.|Keep loader optional; fail fast with schema validation; reuse `ruamel.yaml` only if needed.|
+|Operator DSL magic|Over-using `__rrshift__`/`__or__` may confuse users.|Provide clear docs + fall back to explicit `connect()` API.|
+|Concurrency|Async executor adds complexity.|Ship synchronous path first; async as opt-in feature.|
+|Security|Arbitrary YAML could execute tags.|Disable YAML tags; validate strictly.|
+|Performance|LRU EnginePool may thrash for large DAGs.|Expose pool size option; benchmark.|
 
----
-Next step: **detail design of `Graph` & execution engine** (PR 1).
+## 6 – Missing Items (added)
 
-### Integration Example
-Introduce `examples/ollama_gemma_features.py` demonstrating:
-• Multiple Steps
-• Apply function filtering
-• Parallel Branches (FR / ES translation)
-This serves as high-level regression test during refactor. 
-
-```python
-# example snippet
-qa_step -> filter_apply -> [fr_branch, es_branch]
-``` 
+- Streaming token support in Executor (optional, maintain small code by callback hooks).
+- Metrics / tracing: expose simple event hooks (start/end node) for latency measurement (<40 LOC).
+- Error handling strategy: propagate structured errors, allow retry policy node (future work).
+- CLI sub-command `chainette graph` to visualise DAG via Mermaid export.
