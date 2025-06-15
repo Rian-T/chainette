@@ -66,6 +66,7 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
   - [ ] Batching/engine-reuse logic lives here; Step becomes thin wrapper.
 - Prompt renderer
   - [ ] `prompt.py` (≤80 LOC) – pure functions, no side-effects.
+  - [ ] `context.py` (≤50 LOC) – builds rendering context from histories.
 - Engine pool
   - [ ] `pool.py` (≤60 LOC) – context manager + simple LRU of live engines.
 - Step refactor
@@ -83,6 +84,9 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
 - Tests
   - [ ] Unit tests for graph traversal, pooling, renderer.
   - [ ] Integration tests: vLLM mock + Ollama Gemma path.
+  - [ ] Static graph validation tests (model I/O compatibility).
+- Logging
+  - [ ] Centralised structured logger with verbosity levels (<40 LOC).
 
 *(Line counts are soft caps to enforce minimalism.)*
 
