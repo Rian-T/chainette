@@ -62,8 +62,8 @@ fr_translate = Step(
     output_model=Translation,
     engine_name="gemma_ollama",
     sampling=SamplingParams(temperature=0.2),
-    system_prompt="You are a translator to French. Return JSON with key 'translated'.",
-    user_prompt="{{qa.answer}}",
+    system_prompt="You are a professional translator. Return JSON with key 'translated'.",
+    user_prompt="Translate into French the sentence: 'The answer to the question \"{{chain_input.text}}\" is {{qa.answer}}.'",
 )
 
 es_translate = Step(
@@ -73,8 +73,8 @@ es_translate = Step(
     output_model=Translation,
     engine_name="gemma_ollama",
     sampling=SamplingParams(temperature=0.2),
-    system_prompt="You are a translator to Spanish. Return JSON with key 'translated'.",
-    user_prompt="{{qa.answer}}",
+    system_prompt="You are a professional translator. Return JSON with key 'translated'.",
+    user_prompt="Translate into Spanish the sentence: 'The answer to the question \"{{chain_input.text}}\" is {{qa.answer}}.'",
 )
 
 translation_branch_fr = Branch(name="fr_branch", steps=[fr_translate])
