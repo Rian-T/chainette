@@ -22,8 +22,8 @@ app = typer.Typer(
     add_completion=False,
 )
 
-# Suppress noisy INFO logs from deps before nice output unless user wants debug
-logging.getLogger().setLevel(logging.ERROR)
+# Silence noisy lib logs ASAP
+logging.disable(logging.CRITICAL)
 
 console = Console()
 
@@ -252,7 +252,6 @@ def run(
     try:
         if not quiet:
             from chainette.utils.banner import ChainetteBanner  # noqa: WPS433
-
             ChainetteBanner(console=console).display()
 
         console.print(
@@ -372,6 +371,12 @@ def inspect_dag(
 ):
     """Print a Rich DAG tree without executing the chain."""
     chain_obj = _load_chain_from_file(chain_file, chain_name)
+
+    from chainette.utils.banner import ChainetteBanner
+    ChainetteBanner(console=console).display()
+
+    console.print(f"[bold]Chain:[/] {chain_obj.name} • [bold]DAG ONLY[/]")
+    console.print("")
 
     step_ids = [s.id if not isinstance(s, list) else "parallel_branches" for s in chain_obj.steps]
 
