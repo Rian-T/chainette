@@ -16,7 +16,7 @@ publish(BatchStarted(step_id="step1", count=128, batch_no=0))
 ```
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Type, TypeVar
 
@@ -34,9 +34,9 @@ _Handler = Callable[[Any], None]
 _REGISTRY: Dict[Type["Event"], List[_Handler]] = {}
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, kw_only=True)
 class Event:  # noqa: D101 – base event
-    ts: datetime = datetime.utcnow()
+    ts: datetime = field(default_factory=datetime.utcnow)
 
 
 # --------------------------------------------------------------------------- #
