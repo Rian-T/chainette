@@ -99,3 +99,13 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
   - [ ] Add validation against JSON-Schema.
   - [ ] Support joins/branch IDs explicitly (`join_on="id"`).
   - [ ] Maintain backwards-compat with `
+
+## Developer Workflow Checklist
+1. `poetry install -E ollama`
+2. Ensure `ollama serve` running with `gemma3:1b`.
+3. After each core refactor commit:
+   ```bash
+   poetry run chainette run examples/ollama_gemma_features.py full_chain inputs2.jsonl _tmp_run
+   ```
+   (Expect JSON outputs in `_tmp_run/`.)
+4. If test fails, fix before progressing to next TODO.
