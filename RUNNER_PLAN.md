@@ -60,7 +60,7 @@ Key ideas:
 - Docs
   - [ ] Add *Runner* section in README & snippet in `llm.txt`.
 - Examples
-  - [ ] `examples/runner/huge_batch_demo.py` (uses dummy apply nodes to process 1 M rows quickly).
+  - [x] `examples/runner/huge_batch_demo.py` (uses dummy apply nodes to process 1 M rows quickly).
 - Tests
   - [ ] Stress test: pytest benchmarks memory under 512 MB for 1 M rows.
   - [ ] Snapshot test of DAG tree output (rich console capture).
