@@ -69,8 +69,8 @@ flowchart TD
   - [x] Refactor current `pool.py` ⇒ `engine_pool.py` (+ ref-count).  
   - [x] Unit tests for ref-count & idle flush.  
 - Nodes  
-  - [ ] Remove `input_model`; adjust constructors/tests.  
-  - [ ] Update Steps to use `EngineBroker.acquire`.  
+  - [x] Update `Step` / `ApplyNode` to **optional** `input_model` and switched `Step` to `EngineBroker.acquire`.  
+  - [ ] Hard removal of `input_model` postponed (compatibility).  
 - Executor  
   - [ ] Strip engine-switch logic; final `flush(force=True)`.  
 - CLI  
