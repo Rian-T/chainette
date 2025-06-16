@@ -63,6 +63,57 @@ flowchart TD
 
 ## 3 – Roadmap / TODO
 
-- [x] **Design docs** – sequence diagram + LOC budget table (see `ENGINE_DESIGN.md`).
+- [ ] **Design docs** – sequence diagram + LOC budget table.  
 - Engine layer  
-  - [ ] `broker.py`
+  - [x] `broker.py` with `acquire/flush`.  
+  - [x] Refactor current `pool.py` ⇒ `engine_pool.py` (+ ref-count).  
+  - [x] Unit tests for ref-count & idle flush.  
+- Nodes  
+  - [ ] Remove `input_model`; adjust constructors/tests.  
+  - [ ] Update Steps to use `EngineBroker.acquire`.  
+- Executor  
+  - [ ] Strip engine-switch logic; final `flush(force=True)`.  
+- CLI  
+  - [ ] Raw-dict fallback when first node lacks explicit model.  
+- Docs  
+  - [ ] README + `llm.txt` section *Engine Broker*.  
+- Examples/tests  
+  - [ ] Update Gemma & huge_batch_demo.  
+  - [ ] Stress test with 3 parallel branches (mock engines).
+
+---
+
+## 4 – LOC Budget
+
+| Module                    | Max LOC |
+|---------------------------|---------|
+| `engine/broker.py`        | ≤ 80 |
+| `engine/engine_pool.py`   | ≤ 70 |
+| `core/step.py` diff       | +30 |
+| `core/executor.py` diff   | –40 (cleanup) |
+| other diffs               | minimal |
+
+---
+
+## 5 – Acceptance Criteria
+
+1. Switching models/branches never leaks GPU memory.  
+2. 3-branch mock chain shows correct ref-counts during run.  
+3. `huge_batch_demo` (1 M rows) stays < 500 MB RAM.  
+4. All tests (`pytest -q`) pass.
+
+---
+
+## 6 – Developer Workflow Checklist
+
+1. `poetry install -E ollama`  
+2. Ensure `ollama serve` with `gemma3:1b`.  
+3. After each checked item:  
+
+   ```bash
+   poetry run chainette run examples/runner/huge_batch_demo.py demo_chain inputs_huge.jsonl _tmp_run_engine --stream-writer --quiet
+   pytest -q
+   ```  
+
+4. Inspect `_tmp_run_engine/flattened/` files.  
+5. Commit & paste code snippet below the item in this plan.
