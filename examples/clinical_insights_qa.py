@@ -216,10 +216,9 @@ translate_es_step = Step(
     user_prompt=TRANSLATE_USER_PROMPT_TEMPLATE,
 )
 
-# Custom Flattening Function
+# Flatten helper & ApplyNode ------------------------------------------- #
+
 def flatten_extracted_pairs(pair_list_container: ExtractedPairList, on_field: str = "extracted_pairs") -> list[ExtractedPair]:
-    # This function now processes one ExtractedPairList container at a time.
-    # It returns a list of individual ExtractedPair items found within that container.
     individual_pairs = []
     if hasattr(pair_list_container, on_field):
         items = getattr(pair_list_container, on_field)
@@ -227,13 +226,21 @@ def flatten_extracted_pairs(pair_list_container: ExtractedPairList, on_field: st
             individual_pairs.extend(items)
     return individual_pairs
 
+# Create an ApplyNode so it can be referenced from YAML DSL
+flatten_extracted_pairs_node = Apply(
+    fn=flatten_extracted_pairs,
+    id="flatten_extracted_pairs",
+    input_model=ExtractedPairList,
+    output_model=ExtractedPair,
+)
+
 # Chain Definition
 clinical_qa_chain = Chain(
     name="Clinical Insights QA and Translation",
     emoji="⚕️🌍",
     steps=[
         extract_step,
-        Apply(fn=flatten_extracted_pairs, id="flatten_extracted_pairs", input_model=ExtractedPairList, output_model=ExtractedPair),
+        flatten_extracted_pairs_node,
         qa_step,
         reasoning_answer_step,
         Branch(name="translate_fr", steps=[translate_fr_step]),
