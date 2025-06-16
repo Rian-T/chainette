@@ -36,7 +36,7 @@ def test_parallel_branches_refcount(monkeypatch, n):
             return ""
     monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", staticmethod(lambda *a, **k: _Tok()))
 
-    steps = []
+    chain_steps = []
     for i in range(n):
         st = Step(
             id=f"s{i}",
@@ -46,9 +46,9 @@ def test_parallel_branches_refcount(monkeypatch, n):
             sampling=SamplingParams(),
             user_prompt="dummy",
         )
-        steps.append(Branch(name=f"b{i}", steps=[st]))
+        chain_steps.append(st)
 
-    chain = Chain(name="par", steps=[steps])
+    chain = Chain(name="par", steps=chain_steps)
     inp = [Dummy()]
     chain.run(inp, output_dir="_tmp_parallel", writer=None, debug=False)
 
