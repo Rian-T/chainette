@@ -39,6 +39,7 @@ def test_parallel_branches_refcount(monkeypatch, n):
             output_model=Out,
             engine_name=f"e{i}",
             sampling=SamplingParams(),
+            user_prompt="dummy",
         )
         steps.append(Branch(name=f"b{i}", steps=[st]))
 
