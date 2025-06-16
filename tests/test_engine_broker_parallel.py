@@ -30,7 +30,10 @@ def test_parallel_branches_refcount(monkeypatch, n):
     for name in engines:
         reg._REGISTRY[name] = SimpleNamespace(engine=engines[name], release_engine=lambda: setattr(engines[name], "released", True), model="dummy")
     # patch tokenizer
-    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", staticmethod(lambda *a, **k: None))
+    class _Tok:
+        def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):
+            return ""
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", staticmethod(lambda *a, **k: _Tok()))
 
     steps = []
     for i in range(n):
