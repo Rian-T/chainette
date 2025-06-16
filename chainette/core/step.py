@@ -20,7 +20,6 @@ from vllm import SamplingParams
 from vllm.sampling_params import GuidedDecodingParams
 from chainette.utils.prompt import build_prompt
 from chainette.utils.parsing import parse_llm_json
-from chainette.engine.pool import ENGINE_POOL
 
 __all__ = [
     "Step",
@@ -54,7 +53,6 @@ class Step(Node):
 
         self.tokenizer = None
         self.max_model_len = None
-        self.engine = None
 
         _original_system_prompt = system_prompt.strip()
 
@@ -89,12 +87,10 @@ class Step(Node):
         if len(inputs) != len(item_histories):
             raise ValueError("Mismatch between number of inputs and item_histories in Step.execute")
 
-        # Lazily fetch engine & tokenizer (if needed)
+        # Lazily fetch tokenizer once
         cfg = get_engine_config(self.engine_name)
-        if self.engine is None:
-            self.engine = ENGINE_POOL.acquire(self.engine_name)
-            if getattr(cfg, "backend", "vllm") != "ollama" and self.tokenizer is None:
-                self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
+        if getattr(cfg, "backend", "vllm") != "ollama" and self.tokenizer is None:
+            self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
 
         if not inputs:
             return [], []
@@ -104,7 +100,10 @@ class Step(Node):
         if debug and prompts:
             print(f"STEP {self.id}: generating {len(prompts)} prompt(s). Sample prompt:\n{prompts[0][:500]}…")
 
-        raw_outputs = self.engine.generate(prompts=prompts, sampling_params=self.sampling)
+        from chainette.engine.broker import EngineBroker
+
+        with EngineBroker.acquire(self.engine_name) as eng:
+            raw_outputs = eng.generate(prompts=prompts, sampling_params=self.sampling)
 
         parsed_outputs: List[BaseModel] = []
         new_histories: List[Dict[str, Any]] = []

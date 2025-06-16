@@ -15,8 +15,8 @@ from .apply import ApplyNode
 from .branch import Branch
 from .join_branch import JoinBranch
 from ..io.writer import RunWriter
-from ..engine.registry import get_engine_config
 from chainette.utils.events import publish, BatchStarted, BatchFinished
+from chainette.engine.broker import EngineBroker
 
 __all__ = ["Executor"]
 
@@ -39,27 +39,8 @@ class Executor:  # noqa: D101
         if debug:
             print("EXECUTOR order:", [n.id for n in nodes])
 
-        active_engine_name: str | None = None
-        last_step_obj: Step | None = None
-
         for n in nodes:
             obj = n.ref
-
-            # -------------------------------------------------- #
-            # Engine life-cycle: release when switching context
-            # -------------------------------------------------- #
-            entering_branch = isinstance(obj, Branch)
-            upcoming_engine = obj.engine_name if isinstance(obj, Step) else None  # type: ignore[attr-defined]
-
-            if active_engine_name and (entering_branch or (upcoming_engine and upcoming_engine != active_engine_name)):
-                if debug:
-                    reason = "branch" if entering_branch else f"engine switch → {upcoming_engine}"
-                    print(f"Releasing engine '{active_engine_name}' due to {reason}.")
-                get_engine_config(active_engine_name).release_engine()
-                if last_step_obj is not None:
-                    last_step_obj.engine = None  # pyright: ignore[reportGeneralTypeIssues]
-                active_engine_name = None
-                last_step_obj = None
 
             # -------------------------------------------------- #
             # Execute node types
@@ -96,9 +77,6 @@ class Executor:  # noqa: D101
                 inputs = new_inputs
                 histories = new_histories
 
-                active_engine_name = obj.engine_name
-                last_step_obj = obj
-
             elif isinstance(obj, ApplyNode):
                 inputs, histories = obj.execute(inputs, histories, writer, debug=debug)
 
@@ -115,13 +93,7 @@ class Executor:  # noqa: D101
             else:
                 raise TypeError(f"Unsupported node type: {type(obj).__name__}")
 
-        # Release engine at end of run
-        if active_engine_name:
-            if debug:
-                print(f"Final release of engine '{active_engine_name}'.")
-            get_engine_config(active_engine_name).release_engine()
-            if last_step_obj is not None:
-                last_step_obj.engine = None  # pyright: ignore[reportGeneralTypeIssues]
+        EngineBroker.flush(force=True)
 
         return histories
 
@@ -145,26 +117,12 @@ class Executor:  # noqa: D101
 
         nodes = self.graph.nodes()
 
-        active_engine_name: str | None = None
-        last_step_obj: Step | None = None
-
         for n in nodes:
             obj = n.ref
 
-            entering_branch = isinstance(obj, Branch)
-            upcoming_engine = (
-                obj.engine_name if isinstance(obj, Step) else None  # type: ignore[attr-defined]
-            )
-
-            if active_engine_name and (
-                entering_branch or (upcoming_engine and upcoming_engine != active_engine_name)
-            ):
-                get_engine_config(active_engine_name).release_engine()
-                if last_step_obj is not None:
-                    last_step_obj.engine = None
-                active_engine_name = None
-                last_step_obj = None
-
+            # -------------------------------------------------- #
+            # Execute node types
+            # -------------------------------------------------- #
             if isinstance(obj, Step):
                 bs = self.batch_size if self.batch_size > 0 else len(inputs)
                 batch_no = 0
@@ -204,21 +162,9 @@ class Executor:  # noqa: D101
                 inputs = new_inputs
                 histories = new_histories
 
-                active_engine_name = obj.engine_name
-                last_step_obj = obj
-
-                # Clear to free memory earlier
-                del new_inputs, new_histories
-
             else:
                 # Fallback to original logic for non-Step
                 inputs, histories = obj.execute(inputs, histories, writer, debug=debug)
-
-        # release engine end
-        if active_engine_name:
-            get_engine_config(active_engine_name).release_engine()
-            if last_step_obj is not None:
-                last_step_obj.engine = None
 
         yield {
             "step_id": "_end_",
