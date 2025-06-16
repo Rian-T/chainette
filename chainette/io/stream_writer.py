@@ -124,6 +124,8 @@ class StreamWriter:  # noqa: D101
                     handle.close()
                     self._handles.pop(split)
                     self._line_counts[split] = 0
+                    # open new file for subsequent rows in current batch
+                    handle = self._handle_for(split)
 
         elif self.fmt == "parquet":
             if not _HAS_PARQUET:
