@@ -25,8 +25,8 @@ class EnginePool:  # noqa: D101
     def __init__(self, max_size: int = _MAX_SIZE):
         self.max_size = max_size
         self._lru: "OrderedDict[str, _Entry]" = OrderedDict()
-        # Back-compat alias so existing tests that peek at _cache work.
-        self._cache = self._lru  # type: ignore[attr-defined]
+        # Simple dict mapping name -> engine for backward-compat
+        self._cache: dict[str, Any] = {}
 
     # -------------------------------------------------- #
     def acquire(self, name: str):
@@ -34,7 +34,7 @@ class EnginePool:  # noqa: D101
             entry = self._lru.pop(name)
             entry.last = time()
             self._lru[name] = entry  # move to end
-            self._cache[name] = entry.engine  # keep alias in sync
+            self._cache[name] = entry.engine
             return entry.engine
 
         cfg = get_engine_config(name)
