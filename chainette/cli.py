@@ -213,8 +213,11 @@ def run(
     if isinstance(first_node, Step):
         input_model_type = first_node.input_model
     elif isinstance(first_node, ApplyNode):
-        # Cannot easily infer input type for ApplyNode, user must ensure input file matches
-        console.print("[yellow]Warning: First step is an ApplyNode. Cannot determine expected input model type automatically. Ensure input file format is correct.[/]")
+        if getattr(first_node, "input_model", None):
+            input_model_type = first_node.input_model  # type: ignore[assignment]
+            console.print("[yellow]First step is ApplyNode – using declared input_model for parsing.[/]")
+        else:
+            console.print("[yellow]Warning: First step is an ApplyNode without input_model. Unable to infer type.[/]")
     elif isinstance(first_node, Branch):
          if first_node.steps and isinstance(first_node.steps[0], Step):
              input_model_type = first_node.steps[0].input_model
