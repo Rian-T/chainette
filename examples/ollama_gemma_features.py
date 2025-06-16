@@ -99,6 +99,18 @@ aggregator_step = Step(
 )
 
 # ------------------------------------------------------------------ #
+# Printer node – prints final summary to terminal while preserving chain type safety
+# ------------------------------------------------------------------ #
+
+def _print_result(item: DualSummary):  # noqa: D401 – simple side effect
+    print("\n============ RESULT ============")
+    print(item.summary)
+    print("===============================\n")
+    return [item]
+
+printer_node = apply(_print_result, input_model=DualSummary, output_model=DualSummary, name="print_result")
+
+# ------------------------------------------------------------------ #
 # Chain definition
 # ------------------------------------------------------------------ #
 full_chain = Chain(
@@ -108,5 +120,6 @@ full_chain = Chain(
         filter_node,
         [translation_branch_fr, translation_branch_es],  # Parallel branches with join
         aggregator_step,
+        printer_node,
     ],
 ) 
