@@ -37,6 +37,11 @@ class Translation(BaseModel):
 class Summary(BaseModel):
     summary: str
 
+class MultiLang(BaseModel):
+    summary: str
+    fr: str
+    es: str
+
 # ------------------------------------------------------------------ #
 # Steps
 # ------------------------------------------------------------------ #
@@ -85,31 +90,32 @@ translation_branch_fr = Branch(name="fr_branch", steps=[fr_translate]).join("fr"
 translation_branch_es = Branch(name="es_branch", steps=[es_translate]).join("es")
 
 # Aggregator step consumes joined translations
-class DualSummary(BaseModel):
-    summary: str
-
 aggregator_step = Step(
     id="agg",
     name="Aggregator",
     input_model=Translation,  # dummy, we will feed same QAOut but rely on histories
-    output_model=DualSummary,
+    output_model=MultiLang,
     engine_name="gemma_ollama",
     sampling=SamplingParams(temperature=0.0),
-    system_prompt="Return JSON with key 'summary'.",
-    user_prompt="Compare French: {{fr.answer}}\nSpanish: {{es.answer}}",
+    system_prompt="Return JSON with keys 'summary', 'fr', 'es'.",
+    user_prompt="Provide:\n1) 'summary' – concise English summary of the answer.\n2) 'fr' – French sentence from earlier.\n3) 'es' – Spanish sentence from earlier.\nFrench: {{fr.translated}}\nSpanish: {{es.translated}}",
 )
 
 # ------------------------------------------------------------------ #
 # Printer node – prints final summary to terminal while preserving chain type safety
 # ------------------------------------------------------------------ #
 
-def _print_result(item: DualSummary):  # noqa: D401 – simple side effect
-    print("\n============ RESULT ============")
+def _print_result(item: MultiLang):  # noqa: D401 – simple side effect
+    print("\n============ RESULT (EN) ============")
     print(item.summary)
-    print("===============================\n")
+    print("------------ FR -------------")
+    print(item.fr)
+    print("------------ ES -------------")
+    print(item.es)
+    print("===================================\n")
     return [item]
 
-printer_node = ApplyNode(fn=_print_result, id="print_result", name="Print Result", input_model=DualSummary, output_model=DualSummary)
+printer_node = ApplyNode(fn=_print_result, id="print_result", name="Print Result", input_model=MultiLang, output_model=MultiLang)
 
 # ------------------------------------------------------------------ #
 # Chain definition
