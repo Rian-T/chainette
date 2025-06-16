@@ -188,7 +188,9 @@ def inspect(
 def run(
     chain_file: Path = typer.Argument(..., help="Path to the Python file containing the chain definition.", exists=True, file_okay=True, dir_okay=False, readable=True),
     chain_name: str = typer.Argument(..., help="Name of the chain variable in the file."),
-    input_file: Path = typer.Argument(..., help="Path to the input JSONL file (each line is a Pydantic model for the first step).", exists=True, file_okay=True, dir_okay=False, readable=True),
+    input_file: Path = typer.Argument(None, help="Path to the input JSONL file (each line is a Pydantic model for the first step).", exists=False),
+    hf_dataset: str = typer.Option(None, "--hf-dataset", help="HuggingFace dataset path (repo_id or local folder)"),
+    hf_split: str = typer.Option("train", "--hf-split", help="Split name or slicing notation (e.g. train[:1000])"),
     output_dir: Path = typer.Argument(..., help="Directory to save the output datasets.", file_okay=False, dir_okay=True, writable=True, resolve_path=True),
     generate_flattened: bool = typer.Option(True, "--flattened/--no-flattened", help="Generate a single flattened output file."),
     max_lines_per_file: int = typer.Option(1000, help="Maximum lines per output data file."),
@@ -228,23 +230,44 @@ def run(
 
     # Load inputs
     inputs_data: List[BaseModel] = []
-    try:
-        with open(input_file, "r", encoding="utf-8") as f:
-            for line_num, line in enumerate(f, 1):
-                if line.strip():
-                    data = json.loads(line)
-                    if raw_mode:
-                        inputs_data.append(data)
-                    else:
-                        try:
-                            inputs_data.append(input_model_type.model_validate(data))
-                        except Exception as e:  # noqa: BLE001
-                            console.print(f"[bold red]Error validating line {line_num}: {e}[/]")
-                            raise typer.Exit(code=1)
-        console.print(f"Loaded {len(inputs_data)} input records from {input_file}.")
-    except Exception as e:
-        console.print(f"[bold red]Error reading input file {input_file}: {e}[/]")
-        raise typer.Exit(code=1)
+    if hf_dataset:
+        try:
+            from datasets import load_dataset  # lazy import
+            ds = load_dataset(hf_dataset, split=hf_split)
+            console.print(f"Loaded HF dataset '{hf_dataset}' split '{hf_split}' (rows={len(ds)}).")
+            for row in ds:
+                data_obj = row
+                if not raw_mode:
+                    try:
+                        data_obj = input_model_type.model_validate(row)
+                    except Exception:  # fallback keep raw
+                        pass
+                inputs_data.append(data_obj)
+        except Exception as e:
+            console.print(f"[bold red]Failed to load HuggingFace dataset: {e}[/]")
+            raise typer.Exit(code=1)
+    else:
+        # JSONL path
+        if input_file is None or not input_file.exists():
+            console.print("[bold red]Input file not found.[/]")
+            raise typer.Exit(code=1)
+        try:
+            with open(input_file, "r", encoding="utf-8") as f:
+                for line_num, line in enumerate(f, 1):
+                    if line.strip():
+                        data = json.loads(line)
+                        if raw_mode:
+                            inputs_data.append(data)
+                        else:
+                            try:
+                                inputs_data.append(input_model_type.model_validate(data))
+                            except Exception as e:  # noqa: BLE001
+                                console.print(f"[bold red]Error validating line {line_num}: {e}[/]")
+                                raise typer.Exit(code=1)
+            console.print(f"Loaded {len(inputs_data)} input records from {input_file}.")
+        except Exception as e:
+            console.print(f"[bold red]Error reading input file {input_file}: {e}[/]")
+            raise typer.Exit(code=1)
 
     if not inputs_data:
         console.print("[yellow]Warning: Input file is empty or contains no valid data. Nothing to run.[/]")
@@ -330,6 +353,8 @@ def run_yaml(
     generate_flattened: bool = typer.Option(True, "--flattened/--no-flattened"),
     max_lines_per_file: int = typer.Option(1000),
     symbols_module: str = typer.Option("examples.ollama_gemma_features", help="Python module with step/branch symbols"),
+    hf_dataset: str = typer.Option(None, "--hf-dataset", help="HuggingFace dataset path"),
+    hf_split: str = typer.Option("train", "--hf-split"),
 ):
     """Run a chain defined in YAML."""
     console.print(f"[cyan]Running YAML chain from {yaml_file}…[/]")
@@ -341,23 +366,32 @@ def run_yaml(
     first = chain_obj.steps[0]
     console.print(f"Chain '[bold]{chain_obj.name}[/]' loaded with {len(chain_obj.steps)} top-level steps.")
 
-    # For demo just use inputs.jsonl in cwd if exists
-    input_path = Path("inputs2.jsonl")
-    if not input_path.exists():
-        console.print("[red]inputs2.jsonl not found – create one or enhance CLI with explicit flag.[/]")
-        raise typer.Exit(1)
-
-    import json
-    inputs = [json.loads(l) for l in input_path.read_text().splitlines() if l]
-    # naive model construction
-    from pydantic import BaseModel
+    # Load inputs (HF dataset or default inputs2.jsonl)
+    if hf_dataset:
+        from datasets import load_dataset
+        ds = load_dataset(hf_dataset, split=hf_split)
+        console.print(f"Loaded HF dataset '{hf_dataset}' split '{hf_split}' (rows={len(ds)}).")
+        inputs_raw = list(ds)
+    else:
+        input_path = Path("inputs2.jsonl")
+        if not input_path.exists():
+            console.print("[red]inputs2.jsonl not found – provide --hf-dataset or create file.[/]")
+            raise typer.Exit(1)
+        import json
+        inputs_raw = [json.loads(l) for l in input_path.read_text().splitlines() if l]
 
     model_cls = first.input_model if isinstance(first, Node) else None  # type: ignore[attr-defined]
     if not model_cls:
         console.print("[red]Cannot infer input model.[/]")
         raise typer.Exit(1)
 
-    pyd_inputs = [model_cls.model_validate(obj) for obj in inputs]
+    pyd_inputs = []
+    for obj in inputs_raw:
+        try:
+            pyd_inputs.append(model_cls.model_validate(obj))
+        except Exception:
+            pyd_inputs.append(obj)
+
     chain_obj.run(pyd_inputs, output_dir=output_dir, generate_flattened_output=generate_flattened, max_lines_per_file=max_lines_per_file)
 
     console.print("[green]YAML chain finished.[/]")
