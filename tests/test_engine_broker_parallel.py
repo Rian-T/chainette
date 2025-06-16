@@ -24,12 +24,10 @@ class DummyEng:  # simple counter
 def test_parallel_branches_refcount(monkeypatch, n):
     # prepare dummy engines & configs
     engines = {f"e{i}": DummyEng(f"e{i}") for i in range(n)}
-    def _cfg(name):
-        eng = engines[name]
-        return SimpleNamespace(engine=eng, release_engine=lambda: setattr(eng, "released", True))
-    monkeypatch.setattr("chainette.engine.registry.get_engine_config", _cfg)
-    monkeypatch.setattr("chainette.engine.engine_pool.get_engine_config", _cfg)
-    monkeypatch.setattr("chainette.engine.broker.get_engine_config", _cfg)
+    import chainette.engine.registry as reg
+    reg._REGISTRY.clear()
+    for name in engines:
+        reg._REGISTRY[name] = SimpleNamespace(engine=engines[name], release_engine=lambda: setattr(engines[name], "released", True))
 
     steps = []
     for i in range(n):
