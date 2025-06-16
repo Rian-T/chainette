@@ -1,0 +1,10 @@
+name: Clinical Insights QA and Translation
+batch_size: 1000
+steps:
+  - examples.clinical_insights_qa:extract_step
+  - examples.clinical_insights_qa:flatten_extracted_pairs_node
+  - examples.clinical_insights_qa:qa_step
+  - examples.clinical_insights_qa:reasoning_answer_step
+  - - examples.clinical_insights_qa:translate_fr_step
+    - examples.clinical_insights_qa:translate_de_step
+    - examples.clinical_insights_qa:translate_es_step 
