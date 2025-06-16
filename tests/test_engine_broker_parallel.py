@@ -54,4 +54,6 @@ def test_parallel_branches_refcount(monkeypatch, n):
 
     # after run engines should be released
     EngineBroker.flush(force=True)
+    for name,e in engines.items():
+        print(name, getattr(e,"released",False))
     assert all(getattr(e, "released", False) for e in engines.values()) 
