@@ -25,6 +25,8 @@ class EnginePool:  # noqa: D101
     def __init__(self, max_size: int = _MAX_SIZE):
         self.max_size = max_size
         self._lru: "OrderedDict[str, _Entry]" = OrderedDict()
+        # Back-compat alias so existing tests that peek at _cache work.
+        self._cache = self._lru  # type: ignore[attr-defined]
 
     # -------------------------------------------------- #
     def acquire(self, name: str):
