@@ -19,7 +19,7 @@ class DummyEng:  # simple counter
         self.calls = 0
     def generate(self, *a, **k):
         self.calls += 1
-        return ["{\"result\":\"ok\"}"]
+        return SimpleNamespace(outputs=[SimpleNamespace(text='{"result":"ok"}')])
 
 @pytest.mark.parametrize("n", [3])
 def test_parallel_branches_refcount(monkeypatch, n):
