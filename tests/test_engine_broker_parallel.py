@@ -5,6 +5,7 @@ from chainette.core.chain import Chain
 from pydantic import BaseModel
 from types import SimpleNamespace
 import pytest
+import transformers
 
 class Dummy(BaseModel):
     text: str = "x"
@@ -29,7 +30,7 @@ def test_parallel_branches_refcount(monkeypatch, n):
     for name in engines:
         reg._REGISTRY[name] = SimpleNamespace(engine=engines[name], release_engine=lambda: setattr(engines[name], "released", True), model="dummy")
     # patch tokenizer
-    monkeypatch.setattr("chainette.core.step.AutoTokenizer", SimpleNamespace(from_pretrained=lambda m: None))
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", staticmethod(lambda *a, **k: None))
 
     steps = []
     for i in range(n):
