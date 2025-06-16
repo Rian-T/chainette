@@ -14,6 +14,7 @@ from chainette import (
     Branch,
     apply,
 )
+from chainette.core.apply import ApplyNode
 
 # ------------------------------------------------------------------ #
 # Engine registration (shared for all steps)
@@ -108,7 +109,7 @@ def _print_result(item: DualSummary):  # noqa: D401 – simple side effect
     print("===============================\n")
     return [item]
 
-printer_node = apply(_print_result, input_model=DualSummary, output_model=DualSummary, name="print_result")
+printer_node = ApplyNode(fn=_print_result, id="print_result", name="Print Result", input_model=DualSummary, output_model=DualSummary)
 
 # ------------------------------------------------------------------ #
 # Chain definition
