@@ -222,9 +222,9 @@ def run(
          if first_node.steps and isinstance(first_node.steps[0], Step):
              input_model_type = first_node.steps[0].input_model
 
-    if not input_model_type:
-        console.print("[bold red]Error: Could not determine the input model type for the chain's first step. Ensure the first step is a Step or a Branch starting with a Step.[/]")
-        raise typer.Exit(code=1)
+    raw_mode = input_model_type is None
+    if raw_mode:
+        console.print("[yellow]Input model could not be inferred – loading inputs as raw JSON dicts.[/]")
 
     # Load inputs
     inputs_data: List[BaseModel] = []
@@ -232,15 +232,15 @@ def run(
         with open(input_file, "r", encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
                 if line.strip():
-                    try:
-                        data = json.loads(line)
-                        inputs_data.append(input_model_type.model_validate(data))
-                    except json.JSONDecodeError as e:
-                        console.print(f"[bold red]Error decoding JSON on line {line_num} in {input_file}: {e}[/]")
-                        raise typer.Exit(code=1)
-                    except Exception as e: # Includes Pydantic validation errors
-                        console.print(f"[bold red]Error parsing/validating line {line_num} in {input_file} for model {input_model_type.__name__}: {e}[/]")
-                        raise typer.Exit(code=1)
+                    data = json.loads(line)
+                    if raw_mode:
+                        inputs_data.append(data)
+                    else:
+                        try:
+                            inputs_data.append(input_model_type.model_validate(data))
+                        except Exception as e:  # noqa: BLE001
+                            console.print(f"[bold red]Error validating line {line_num}: {e}[/]")
+                            raise typer.Exit(code=1)
         console.print(f"Loaded {len(inputs_data)} input records from {input_file}.")
     except Exception as e:
         console.print(f"[bold red]Error reading input file {input_file}: {e}[/]")

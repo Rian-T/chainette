@@ -34,7 +34,7 @@ class Step(Node):
         *,
         id: str,
         name: str,
-        input_model: Type[BaseModel],
+        input_model: Type[BaseModel] | None = None,
         output_model: Type[BaseModel],
         engine_name: str,
         sampling: SamplingParams,
@@ -46,7 +46,7 @@ class Step(Node):
     ) -> None:
         self.id = id
         self.name = name
-        self.input_model = input_model
+        self.input_model: Type[BaseModel] | None = input_model
         self.output_model = output_model
         self.engine_name = engine_name
         self.sampling = sampling
