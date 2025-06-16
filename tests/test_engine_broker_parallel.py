@@ -27,7 +27,9 @@ def test_parallel_branches_refcount(monkeypatch, n):
     import chainette.engine.registry as reg
     reg._REGISTRY.clear()
     for name in engines:
-        reg._REGISTRY[name] = SimpleNamespace(engine=engines[name], release_engine=lambda: setattr(engines[name], "released", True))
+        reg._REGISTRY[name] = SimpleNamespace(engine=engines[name], release_engine=lambda: setattr(engines[name], "released", True), model="dummy")
+    # patch tokenizer
+    monkeypatch.setattr("chainette.core.step.AutoTokenizer", SimpleNamespace(from_pretrained=lambda m: None))
 
     steps = []
     for i in range(n):
