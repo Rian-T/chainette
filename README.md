@@ -227,3 +227,22 @@ Check the `examples/` directory:
 ## License
 
 MIT
+
+## Engine Broker (2025)
+
+A minimal ref-count abstraction ensuring engines spin up lazily and are flushed deterministically.
+
+```python
+from chainette.engine.broker import EngineBroker as EB
+
+with EB.acquire("gemma_ollama") as eng:
+    eng.generate(prompts, sampling)
+
+# At end of run Executor calls
+EB.flush(force=True)  # frees any idle engines
+```
+
+Key points
+1. Context-manager → zero manual release in nodes.
+2. Reference counting prevents premature kills while branches share an engine.
+3. Idle engines auto-evict after 180 s or via `force=True`.

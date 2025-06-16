@@ -156,4 +156,12 @@ Chainette's *Runner* handles millions of items with <500 MB RAM:
 • Rich Live logger displays an ASCII banner, DAG tree, and per-step progress.
 CLI flags: `--stream-writer`, `--quiet`, `--json-logs`, and `inspect-dag`.
 
+### Engine Broker
+Lazy spin-up + ref-counted release:
+```python
+with EngineBroker.acquire("gemma_ollama") as eng:
+    eng.generate(prompts)
+```
+Executor calls `EngineBroker.flush(force=True)` at run end.
+
 End-Of-File 
