@@ -153,6 +153,23 @@ Key runtime components:
 You still build chains exactly the same way; `Chain.run()` now proxies to the
 executor under the hood, so existing code doesn't change.
 
+## Runner Improvements (June 2025)
+
+Chainette now ships with a streaming execution **Runner**:
+
+* Chunked batching via `Executor.run_iter` → constant-memory even on millions of rows.
+* `StreamWriter` flushes each batch immediately and rolls files (`000.jsonl`, `001.jsonl`, …). Optional Parquet support (`pyarrow`).
+* Rich live logger—ASCII banner, DAG tree, progress bars—powered by an EventBus.
+* CLI additions:
+  * `--stream-writer` flag (recommended for big runs).
+  * `--quiet / --json-logs` for headless or scripted runs.
+  * `inspect-dag` command to visualise the graph without execution.
+
+Quick demo:
+```bash
+poetry run chainette run examples/runner/huge_batch_demo.py demo_chain inputs_huge.jsonl out --stream-writer
+```
+
 ## CLI Usage
 
 Chainette provides a simple CLI for managing LLM engines:

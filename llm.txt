@@ -149,4 +149,11 @@ Internal Data Flow Cheat-Sheet
    └─ release engine(s)
    └─ writer.finalize() → writes graph.json, datasets, flattened.
 
+### Runner (streaming execution)
+Chainette's *Runner* handles millions of items with <500 MB RAM:
+• `Executor.run_iter` yields batches and frees memory.
+• `StreamWriter` streams JSONL/Parquet, rolling every N lines.
+• Rich Live logger displays an ASCII banner, DAG tree, and per-step progress.
+CLI flags: `--stream-writer`, `--quiet`, `--json-logs`, and `inspect-dag`.
+
 End-Of-File 
