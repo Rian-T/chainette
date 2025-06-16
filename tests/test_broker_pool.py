@@ -27,6 +27,7 @@ def test_ref_count_and_flush(monkeypatch):
     EngineBroker._track.clear()
     monkeypatch.setattr("chainette.engine.registry.get_engine_config", lambda n: cfg)
     monkeypatch.setattr("chainette.engine.engine_pool.get_engine_config", lambda n: cfg)
+    monkeypatch.setattr("chainette.engine.broker.get_engine_config", lambda n: cfg)
 
     # acquire context should keep ref>0 so flush shouldn't release
     with EngineBroker.acquire("dummy") as e:
