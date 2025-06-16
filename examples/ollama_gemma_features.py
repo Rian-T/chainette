@@ -98,7 +98,7 @@ aggregator_step = Step(
     engine_name="gemma_ollama",
     sampling=SamplingParams(temperature=0.0),
     system_prompt="Return JSON with keys 'summary', 'fr', 'es'.",
-    user_prompt="Provide:\n1) 'summary' – concise English summary of the answer.\n2) 'fr' – French sentence from earlier.\n3) 'es' – Spanish sentence from earlier.\nFrench: {{fr.translated}}\nSpanish: {{es.translated}}",
+    user_prompt="Provide:\n1) 'summary' – concise English summary of the answer.\n2) 'fr' – French translation.\n3) 'es' – Spanish translation.\nFrench: {{ fr.translated if fr.translated is defined else fr.answer }}\nSpanish: {{ es.translated if es.translated is defined else es.answer }}",
 )
 
 # ------------------------------------------------------------------ #
