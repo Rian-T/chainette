@@ -28,7 +28,8 @@ def test_parallel_branches_refcount(monkeypatch, n):
     import chainette.engine.registry as reg
     reg._REGISTRY.clear()
     for name in engines:
-        reg._REGISTRY[name] = SimpleNamespace(engine=engines[name], release_engine=lambda: setattr(engines[name], "released", True), model="dummy")
+        eng = engines[name]
+        reg._REGISTRY[name] = SimpleNamespace(engine=eng, release_engine=lambda e=eng: setattr(e, "released", True), model="dummy")
     # patch tokenizer
     class _Tok:
         def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):
