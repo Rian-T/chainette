@@ -34,19 +34,23 @@ class EnginePool:  # noqa: D101
             entry = self._lru.pop(name)
             entry.last = time()
             self._lru[name] = entry  # move to end
+            self._cache[name] = entry.engine  # keep alias in sync
             return entry.engine
 
         cfg = get_engine_config(name)
         eng = cfg.engine  # lazy-load happens inside registry
         self._lru[name] = _Entry(eng)
+        self._cache[name] = eng
         if len(self._lru) > self.max_size:
             old_name, _ = self._lru.popitem(last=False)
+            self._cache.pop(old_name, None)
             get_engine_config(old_name).release_engine()
         return eng
 
     # -------------------------------------------------- #
     def pop(self, name: str):  # helper for Broker.flush
         self._lru.pop(name, None)
+        self._cache.pop(name, None)
 
 
 ENGINE_POOL = EnginePool() 
