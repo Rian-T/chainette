@@ -31,9 +31,9 @@ def test_ref_count_and_flush(monkeypatch):
     # acquire context should keep ref>0 so flush shouldn't release
     with EngineBroker.acquire("dummy") as e:
         assert e is eng
-        EngineBroker.flush()
+        EngineBroker.flush(force=True)
         assert cfg.released is False
 
     # now ref==0 → flush should release
-    EngineBroker.flush()
+    EngineBroker.flush(force=True)
     assert cfg.released is True 
