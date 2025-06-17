@@ -200,9 +200,10 @@ New TODOs (continue incremental tick-box style):
 - [x] **18. Update tests**  
       • Remove / rewrite tests that instantiate in-proc vLLM.  
       • Ensure test suite passes when `import vllm` raises `ModuleNotFoundError`.
-- [x] **19. Implement `chainette engines serve-vllm` CLI helper**  
+- [x] **19. Implement `chainette warmup` CLI helper**  
       Spawns `vllm serve <hf_repo>` (same as `python -m vllm.entrypoints.openai.api_server`) in a background *subprocess* and prints the base URL.  
-      Gracefully warns if `vllm` executable is missing.
+      Loads a chain definition (py or yaml), instantiates all *non-lazy* engines, triggering any required server spin-up.  
+      Gracefully warns if required back-end extras (e.g. `vllm`) are missing.
 - [x] **20. Runtime guard**  
       At import time, raise clear `ImportError` only if user tries to run `serve-vllm` without the optional extra. Rest of Chainette must work fine w/out `vllm`.
 - [ ] **21. Docs & README**  

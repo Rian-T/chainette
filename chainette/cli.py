@@ -423,82 +423,64 @@ def inspect_dag(
     console.print(f"[green]DAG inspection complete – {len(step_ids)} top-level nodes shown.[/]")
 
 # --------------------------------------------------------------------------- #
-# vLLM Server helper (Phase D)                                               #
+# Warm-up non-lazy engines for a Chain                                        #
 # --------------------------------------------------------------------------- #
 
 
-@app.command("serve-vllm")
-def serve_vllm(
-    model: str = typer.Argument(..., help="HuggingFace repo or local path for the model to load."),
-    port: int = typer.Option(8000, "--port", "-p", help="Port to bind the OpenAI-compatible server."),
-    dtype: str = typer.Option(None, "--dtype", help="Torch dtype to load weights with (e.g. float16)."),
-    gpu_memory_utilization: float = typer.Option(None, "--gpu-mem", help="Limit GPU memory util (0-1 range)."),
-    open_browser: bool = typer.Option(False, "--open-browser", help="Open the /docs endpoint in browser once ready."),
+@app.command("warmup")
+def warmup(
+    chain_file: Path = typer.Argument(..., help="Python or YAML file defining the chain."),
+    chain_name: str = typer.Option(None, "--chain-name", help="Name of the Chain variable when using a .py file."),
 ):
-    """Spawn a **vLLM** OpenAI-compatible server as a foreground subprocess.
+    """Instantiate all *non-lazy* engines used by the specified chain.
 
-    This is a thin convenience wrapper around:
+    • For **.py** files you must pass `--chain-name` pointing to the Chain object.
+    • For **.yml/.yaml** definitions we call `yaml_loader.load_chain`.
 
-        python -m vllm.entrypoints.openai.api_server --model <model> --port <port>
-
-    Additional flags like ``--dtype`` or ``--gpu-memory-utilization`` can be
-    provided via the options above.
+    The command simply triggers the lazy `cfg.engine` property so HTTP clients
+    get instantiated and (in future) any required vLLM server processes are
+    spawned.  Currently it only instantiates clients – process management will
+    be added once `EngineProcessManager` lands.
     """
 
-    import subprocess
-    import sys
-    import time
-    import webbrowser
+    console.print("[cyan]Warming up engines…[/]")
 
-    try:
-        import vllm  # noqa: F401 – just to verify extra is installed
-    except ModuleNotFoundError:
-        console.print(
-            "[bold red]vLLM is not installed. Install with:[/] `pip install chainette[vllm]`",
-        )
-        raise typer.Exit(1)
+    # Resolve chain object
+    if chain_file.suffix in {".yml", ".yaml"}:
+        from chainette.yaml_loader import load_chain as _load_chain_yaml  # noqa: WPS433
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "vllm.entrypoints.openai.api_server",
-        "--model",
-        model,
-        "--port",
-        str(port),
-    ]
+        chain_obj = _load_chain_yaml(chain_file)
+    else:
+        if chain_name is None:
+            console.print("[red]--chain-name is required for Python files.[/]")
+            raise typer.Exit(1)
+        chain_obj = _load_chain_from_file(chain_file, chain_name)
 
-    if dtype:
-        cmd += ["--dtype", dtype]
-    if gpu_memory_utilization is not None:
-        cmd += ["--gpu-memory-utilization", str(gpu_memory_utilization)]
+    # Collect unique engine configs
+    from chainette.core.step import Step  # lazy import
 
-    console.print(f"[green]Starting vLLM server:[/] {' '.join(cmd)}")
+    engine_names: set[str] = set()
+    for node in chain_obj.steps:
+        nodes = node if not isinstance(node, list) else node  # flatten top-level
+        for sub in (nodes if isinstance(nodes, list) else [nodes]):
+            if isinstance(sub, Step):
+                engine_names.add(sub.engine_name)
 
-    try:
-        proc = subprocess.Popen(cmd)
-    except FileNotFoundError as e:
-        console.print("[bold red]Failed to start vLLM server – executable not found.[/]")
-        console.print(str(e))
-        raise typer.Exit(1)
+    warmed = 0
+    from chainette.engine.registry import get_engine_config
 
-    # Optionally open browser after small delay
-    if open_browser:
-        time.sleep(2)
-        webbrowser.open(f"http://localhost:{port}/docs")
+    for name in engine_names:
+        cfg = get_engine_config(name)
+        if cfg.lazy:
+            continue  # skip lazy engines
+        _ = cfg.engine  # instantiate
+        warmed += 1
+        console.print(f"[green]✓[/] {name} ({cfg.backend}) ready")
 
-    console.print("[cyan]vLLM server running – press Ctrl+C to stop.[/]")
-
-    try:
-        proc.wait()
-    except KeyboardInterrupt:
-        console.print("\n[bold]Stopping vLLM server…[/]")
-        proc.terminate()
-        try:
-            proc.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        console.print("[green]vLLM server stopped.[/]")
+    if warmed == 0:
+        console.print("[yellow]No non-lazy engines found – nothing to warm up.[/]")
+    else:
+        console.print(f"[bold green]Warm-up complete – {warmed} engine(s) ready.[/]")
 
 if __name__ == "__main__":
     app() 
