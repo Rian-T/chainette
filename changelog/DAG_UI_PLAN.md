@@ -142,7 +142,17 @@ Key pieces (all under `utils/`):
 
 - [ ] 2. Add `StepTotalItems` event in `utils.events`.  
 - [ ] 3. Update `core.executor.Executor` to publish totals.  
-- [ ] 4. Rewrite `utils.logging_v2` → `logging_v3` (keep alias import).  
+- [x] 4. Rewrite `utils.logging_v2` → `logging_v3` (keep alias import).  
+  ```python
+  # utils/logging_v3.py (excerpt)
+  @subscribe(StepTotalItems)
+  def _on_total(evt):
+      task = prog.add_task(total=evt.total, id=evt.step_id)
+  
+  @subscribe(BatchFinished)
+  def _on_batch_finish(evt):
+      prog.update(task, advance=evt.count)
+  ```
 - [x] 5. Replace DAG calls in `cli.py`.  
   ```diff
   - step_ids = [...]
