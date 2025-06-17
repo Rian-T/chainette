@@ -23,6 +23,7 @@ except ModuleNotFoundError:  # pragma: no cover – handled later
 __all__ = [
     "BaseHTTPClient",
     "OpenAIClient",
+    "VLLMClient",
 ]
 
 
@@ -93,5 +94,48 @@ class OpenAIClient(BaseHTTPClient):  # noqa: D101
                 response_format={"type": "json_object"},
             )
             text = resp.choices[0].message.content or ""
+            out.append(_RequestOutput(text))
+        return out
+
+
+# --------------------------------------------------------------------------- #
+# vLLM Serve – OpenAI compatible endpoint                                    #
+# --------------------------------------------------------------------------- #
+
+
+class VLLMClient(BaseHTTPClient):  # noqa: D101
+    """Client for vLLM's OpenAI-compatible HTTP server.
+
+    It reuses the same payload schema as OpenAI but does NOT require auth.
+    """
+
+    def __init__(self, endpoint: str | None, model: str):
+        super().__init__(endpoint or "http://localhost:8000/v1", None, model)
+        import httpx  # local import to avoid ppl who don't use vllm
+
+        self._client = httpx.Client(base_url=self.endpoint, timeout=60)
+
+    # ------------------------------------------------------------------ #
+    def generate(self, *, prompts: List[str], sampling_params: Any | None = None):  # noqa: D401
+        import httpx
+
+        temperature: float | None = None
+        if sampling_params is not None and hasattr(sampling_params, "temperature"):
+            temperature = sampling_params.temperature  # type: ignore[attr-defined]
+
+        out: List[_RequestOutput] = []
+        for prompt in prompts:
+            payload = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "response_format": {"type": "json_object"},
+            }
+            if temperature is not None:
+                payload["temperature"] = temperature
+
+            resp: httpx.Response = self._client.post("/chat/completions", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            text = data["choices"][0]["message"]["content"]
             out.append(_RequestOutput(text))
         return out 

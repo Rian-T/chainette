@@ -29,7 +29,7 @@ def build_prompt(step, item_history: Dict[str, Any]) -> str:  # noqa: D401
         prompt_lines.append("## assistant\n")
         return "\n\n".join(prompt_lines)
 
-    if backend == "openai":
+    if backend in ("openai", "vllm_api"):
         # Embed system message first, followed by user content.
         sys_msg = next((m["content"] for m in messages if m["role"] == "system"), "")
         user_msg = next((m["content"] for m in messages if m["role"] == "user"), "")
