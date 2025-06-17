@@ -54,7 +54,21 @@ class BaseHTTPClient:  # noqa: D101 – base contract
 
     # ------------------------------------------------------------------ #
     def generate(self, *, prompts: List[str], sampling_params: Any | None = None):  # noqa: D401
-        """Subclasses must implement."""
+        """Shared generate that delegates to :meth:`_send_chat` per prompt."""
+        out: List[_RequestOutput] = []
+        temperature: float | None = None
+        if sampling_params is not None and hasattr(sampling_params, "temperature"):
+            temperature = sampling_params.temperature  # type: ignore[attr-defined]
+
+        for p in prompts:
+            messages = p if isinstance(p, list) else [{"role": "user", "content": p}]
+            text = self._send_chat(messages=messages, temperature=temperature)
+            out.append(_RequestOutput(text))
+        return out
+
+    # ------------------------------------------------------------------ #
+    def _send_chat(self, *, messages: List[dict], temperature: float | None):  # noqa: D401
+        """Backend-specific implementation – must return response text."""
         raise NotImplementedError
 
 
@@ -71,32 +85,16 @@ class OpenAIClient(BaseHTTPClient):  # noqa: D101
                 "Install with: pip install openai"
             )
         super().__init__(endpoint, api_key or os.getenv("OPENAI_API_KEY"), model)
-        # Build a lazily-instantiated client – avoids import cost if unused.
         self._client = openai.OpenAI(base_url=self.endpoint, api_key=self.api_key)  # type: ignore[arg-type]
 
-    # ------------------------------------------------------------------ #
-    def generate(self, *, prompts: List[str], sampling_params: Any | None = None):  # noqa: D401
-        """Return list of objects exposing .outputs[0].text.
-
-        We send each *prompt* as a single-message chat completion requesting
-        **JSON response format**.  The content is returned verbatim so that
-        Chainette's existing JSON→Pydantic validation continues to work.
-        """
-        temperature: float | None = None
-        if sampling_params is not None and hasattr(sampling_params, "temperature"):
-            temperature = sampling_params.temperature  # type: ignore[attr-defined]
-
-        out: List[_RequestOutput] = []
-        for prompt in prompts:
-            resp = self._client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=temperature,
-                response_format={"type": "json_object"},
-            )
-            text = resp.choices[0].message.content or ""
-            out.append(_RequestOutput(text))
-        return out
+    def _send_chat(self, *, messages: List[dict], temperature: float | None):  # noqa: D401
+        resp = self._client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            response_format={"type": "json_object"},
+        )
+        return resp.choices[0].message.content or ""
 
 
 # --------------------------------------------------------------------------- #
@@ -105,41 +103,28 @@ class OpenAIClient(BaseHTTPClient):  # noqa: D101
 
 
 class VLLMClient(BaseHTTPClient):  # noqa: D101
-    """Client for vLLM's OpenAI-compatible HTTP server.
-
-    It reuses the same payload schema as OpenAI but does NOT require auth.
-    """
+    """Client for vLLM's OpenAI-compatible HTTP server."""
 
     def __init__(self, endpoint: str | None, model: str):
         super().__init__(endpoint or "http://localhost:8000/v1", None, model)
-        import httpx  # local import to avoid ppl who don't use vllm
+        import httpx
 
         self._client = httpx.Client(base_url=self.endpoint, timeout=60)
 
-    # ------------------------------------------------------------------ #
-    def generate(self, *, prompts: List[str], sampling_params: Any | None = None):  # noqa: D401
+    def _send_chat(self, *, messages: List[dict], temperature: float | None):  # noqa: D401
         import httpx
 
-        temperature: float | None = None
-        if sampling_params is not None and hasattr(sampling_params, "temperature"):
-            temperature = sampling_params.temperature  # type: ignore[attr-defined]
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+        }
+        if temperature is not None:
+            payload["temperature"] = temperature
 
-        out: List[_RequestOutput] = []
-        for prompt in prompts:
-            payload = {
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "response_format": {"type": "json_object"},
-            }
-            if temperature is not None:
-                payload["temperature"] = temperature
-
-            resp: httpx.Response = self._client.post("/chat/completions", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            text = data["choices"][0]["message"]["content"]
-            out.append(_RequestOutput(text))
-        return out
+        resp: httpx.Response = self._client.post("/chat/completions", json=payload)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
 
 
 # --------------------------------------------------------------------------- #
@@ -159,31 +144,22 @@ class OllamaHTTPClient(BaseHTTPClient):  # noqa: D101
 
         self._client = httpx.Client(base_url=self.endpoint, timeout=60)
 
-    def generate(self, *, prompts: List[str], sampling_params: Any | None = None):  # noqa: D401
+    def _send_chat(self, *, messages: List[dict], temperature: float | None):  # noqa: D401
         import httpx
 
-        temperature: float | None = None
-        if sampling_params is not None and hasattr(sampling_params, "temperature"):
-            temperature = sampling_params.temperature  # type: ignore[attr-defined]
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+        }
+        if temperature is not None:
+            payload["options"] = {"temperature": temperature}
 
-        out: List[_RequestOutput] = []
-        for prompt in prompts:
-            payload = {
-                "model": self.model,
-                "messages": [{"role": "user", "content": prompt}],
-                "stream": False,
-            }
-            if temperature is not None:
-                payload["options"] = {"temperature": temperature}
-
-            resp: httpx.Response = self._client.post("/api/chat", json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-            # Response may differ depending on version: prefer message.content
-            text = (
-                data.get("message", {}).get("content")
-                if isinstance(data, dict)
-                else data["message"]["content"]
-            )
-            out.append(_RequestOutput(text))
-        return out 
+        resp: httpx.Response = self._client.post("/api/chat", json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        return (
+            data.get("message", {}).get("content")
+            if isinstance(data, dict)
+            else data["message"]["content"]
+        ) 
