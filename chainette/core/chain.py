@@ -94,8 +94,7 @@ class Chain:
                 from chainette.utils.logging_v2 import show_dag_tree
 
                 ChainetteBanner().display()  # type: ignore[call-arg]
-                step_ids = [s.id if not isinstance(s, list) else "parallel_branches" for s in self.steps]
-                show_dag_tree(step_ids)
+                show_dag_tree(self)
             except Exception:  # noqa: BLE001
                 # UI is optional – ignore failures (e.g., non-TTY env)
                 pass

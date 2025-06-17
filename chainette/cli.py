@@ -299,10 +299,7 @@ def run(
         if not quiet and not json_logs:
             from chainette.utils.logging_v2 import show_dag_tree  # noqa: WPS433
 
-            step_ids = [
-                s.id if not isinstance(s, list) else "parallel_branches" for s in chain_obj.steps
-            ]
-            show_dag_tree(step_ids)
+            show_dag_tree(chain_obj)
 
         if json_logs:
             # Simple JSON print of events
@@ -415,12 +412,10 @@ def inspect_dag(
     console.print(f"[bold]Chain:[/] {chain_obj.name} • [bold]DAG ONLY[/]")
     console.print("")
 
-    step_ids = [s.id if not isinstance(s, list) else "parallel_branches" for s in chain_obj.steps]
-
     from chainette.utils.logging_v2 import show_dag_tree  # noqa: WPS433
 
-    show_dag_tree(step_ids)
-    console.print(f"[green]DAG inspection complete – {len(step_ids)} top-level nodes shown.[/]")
+    show_dag_tree(chain_obj)
+    console.print(f"[green]DAG inspection complete – {len(chain_obj.steps)} top-level nodes shown.[/]")
 
 # --------------------------------------------------------------------------- #
 # Warm-up non-lazy engines for a Chain                                        #

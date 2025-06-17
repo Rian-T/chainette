@@ -64,10 +64,25 @@ def _on_batch_finish(evt: BatchFinished):  # noqa: D401 – event hook
 # Public helpers
 # --------------------------------------------------------------------------- #
 
-def show_dag_tree(step_ids):  # noqa: D401
-    """Render a simple tree of *step_ids* before execution."""
+def show_dag_tree(obj):  # noqa: D401
+    """Render the execution DAG before run.
+
+    Accepts either a *Chain* instance or a legacy *list[str]* of step IDs for
+    backward-compat.
+    """
+    try:
+        from chainette import Chain  # public import – avoids heavy core deps
+        from chainette.utils.dag import build_rich_tree  # local helper
+
+        if isinstance(obj, Chain):
+            console.print(build_rich_tree(obj))
+            return
+    except Exception:  # pragma: no cover – fallback safety
+        pass
+
+    # Legacy flat list path
     tree = Tree("[bold]Execution DAG[/]")
-    for sid in step_ids:
+    for sid in obj:  # type: ignore[not-an-iterable]
         tree.add(f"[cyan]{sid}[/]")
     console.print(tree)
 
