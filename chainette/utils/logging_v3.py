@@ -70,11 +70,11 @@ def _on_batch_finish(evt: BatchFinished):  # noqa: D401 – event hook
 # Public helpers
 # --------------------------------------------------------------------------- #
 
-def show_dag_tree(obj: Any):  # noqa: D401
+def show_dag_tree(obj: Any, **kw):  # noqa: D401
     """Render the execution DAG tree (Chain or legacy list)."""
     if hasattr(obj, "steps"):
         try:
-            console.print(build_rich_tree(obj))
+            console.print(build_rich_tree(obj, **kw))
             return
         except Exception:
             pass

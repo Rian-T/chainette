@@ -195,6 +195,8 @@ def run(
     generate_flattened: bool = typer.Option(True, "--flattened/--no-flattened", help="Generate a single flattened output file."),
     max_lines_per_file: int = typer.Option(1000, help="Maximum lines per output data file."),
     stream_writer: bool = typer.Option(False, "--stream-writer/--no-stream-writer", help="Use the new incremental StreamWriter."),
+    no_icons: bool = typer.Option(False, "--no-icons", help="Disable emoji/icons in DAG tree."),
+    max_branches: int = typer.Option(None, "--max-branches", help="Limit number of branches shown under parallel wrapper."),
     quiet: bool = typer.Option(False, "--quiet", help="Disable live progress/output."),
     json_logs: bool = typer.Option(False, "--json-logs", help="Emit JSON event logs instead of Rich UI."),
 ):
@@ -298,8 +300,10 @@ def run(
 
         if not quiet and not json_logs:
             from chainette.utils.logging_v3 import show_dag_tree  # noqa: WPS433
+            from chainette.utils.dag import RenderOptions
 
-            show_dag_tree(chain_obj)
+            opts = RenderOptions(icons_on=(not no_icons), max_branches=max_branches)
+            show_dag_tree(chain_obj, opts=opts)
 
         if json_logs:
             # Simple JSON print of events
@@ -413,8 +417,10 @@ def inspect_dag(
     console.print("")
 
     from chainette.utils.logging_v3 import show_dag_tree  # noqa: WPS433
+    from chainette.utils.dag import RenderOptions
 
-    show_dag_tree(chain_obj)
+    opts = RenderOptions(icons_on=True, max_branches=max_branches)
+    show_dag_tree(chain_obj, opts=opts)
     console.print(f"[green]DAG inspection complete – {len(chain_obj.steps)} top-level nodes shown.[/]")
 
 # --------------------------------------------------------------------------- #

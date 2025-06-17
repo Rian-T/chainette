@@ -6,6 +6,7 @@ iter_nodes(chain) yields (depth, obj) depth-first.
 build_rich_tree(chain) returns a Rich *Tree* ready for printing.
 """
 from typing import Iterator, List, Tuple, Any
+from dataclasses import dataclass
 
 from chainette import Chain  # public import exposes core types via __all__
 from chainette.core.branch import Branch
@@ -14,6 +15,7 @@ from chainette.core.node import Node
 __all__ = [
     "iter_nodes",
     "build_rich_tree",
+    "RenderOptions",
 ]
 
 # --------------------------------------------------------------------------- #
@@ -41,27 +43,49 @@ def iter_nodes(chain: Chain) -> Iterator[Tuple[int, Any]]:  # noqa: D401
 
 
 # --------------------------------------------------------------------------- #
+# Render options
+# --------------------------------------------------------------------------- #
+
+@dataclass(slots=True)
+class RenderOptions:
+    icons_on: bool = True
+    max_branches: int | None = None  # None = unlimited
+
+
+# --------------------------------------------------------------------------- #
 # Rich-aware tree builder (import lazily to avoid hard dep at import time)
 # --------------------------------------------------------------------------- #
 
-def build_rich_tree(chain: Chain):  # noqa: D401 – return type is Tree but avoid import
+def build_rich_tree(chain: Chain, opts: RenderOptions | None = None):  # noqa: D401
     """Return a *rich.tree.Tree* visualisation of *chain* (side-effect-free)."""
     from rich.tree import Tree  # local import keeps this module lightweight
+
+    if opts is None:
+        opts = RenderOptions()
 
     tree = Tree("[bold]Execution DAG[/]")
 
     def _add(parent: "Tree", objs):
         for obj in objs:
             if isinstance(obj, list):  # parallel branches wrapper
-                p = parent.add("[dim]parallel ⨉ %d[/]" % len(obj))
-                for br in obj:
+                caption = "[dim]parallel ⨉ %d[/]" % len(obj)
+                p = parent.add(caption)
+
+                branches_to_show = obj
+                if opts.max_branches is not None and len(obj) > opts.max_branches:
+                    branches_to_show = obj[: opts.max_branches]
+
+                for br in branches_to_show:
                     bnode = p.add(f"[magenta]{br.name}[/]")
                     _add(bnode, br.steps)
+
+                if branches_to_show is not obj:
+                    p.add(f"[dim]+{len(obj) - len(branches_to_show)} more…[/]")
             elif isinstance(obj, Branch):
                 bnode = parent.add(f"[magenta]{obj.name}[/]")
                 _add(bnode, obj.steps)
             else:  # Step / Apply / JoinBranch
-                emoji = getattr(obj, "emoji", "")
+                emoji = getattr(obj, "emoji", "") if opts.icons_on else ""
                 label = f"{emoji} [cyan]{obj.id}[/]" if emoji else f"[cyan]{obj.id}[/]"
                 parent.add(label)
 
