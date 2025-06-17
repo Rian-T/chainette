@@ -179,7 +179,7 @@ Caching is optional ⇒ `EnginePool` is demoted to tiny dict of BaseHTTPClient.
 
 ### Phase B – vLLM Serve
 - [x] **8. Implement `VLLMClient` (+ unit tests)**
-- [ ] **9. Add CLI helper `chainette engines warmup vllm_api` (spins docker) – optional**
+- [ ] **9. Add CLI helper `chainette engines warmup vllm_api` – optional**
 - [ ] **10. Benchmark parity vs local vLLM (doc in `BENCHMARK.md`)**
 
 ### Phase C – Ollama HTTP
@@ -188,7 +188,7 @@ Caching is optional ⇒ `EnginePool` is demoted to tiny dict of BaseHTTPClient.
 
 ### Phase D – Eliminate in-process vLLM (`vllm_local`) backend
 
-Goal: fully decouple Chainette from the heavy `vllm` python import. All inference goes through **HTTP** (`vllm_api`). This unlocks running Chainette on CPU-only machines while models live in GPU servers / docker.
+Goal: fully decouple Chainette from the heavy `vllm` python import. All inference goes through **HTTP** (`vllm_api`). This unlocks running Chainette on CPU-only machines while models live in GPU servers.
 
 New TODOs (continue incremental tick-box style):
 
@@ -210,11 +210,33 @@ New TODOs (continue incremental tick-box style):
       Gracefully warns if required back-end extras (e.g. `vllm`) are missing.
 - [x] **20. Runtime guard**  
       At import time, raise clear `ImportError` only if user tries to run `serve-vllm` without the optional extra. Rest of Chainette must work fine w/out `vllm`.
-- [ ] **21. Docs & README**  
-      • Replace references to "in-process vLLM" with "vLLM Serve".  
-      • Add install snippet: `pip install chainette[vllm]` for the CLI helper.
-- [x] **22. Deprecation note**  
-      Emit `UserWarning` for configs still using `backend: vllm_local` pointing users to migrate:  `backend: vllm_api  endpoint: http://localhost:8000/v1`.
+- [x] **21. Docs & README**
+
+### Phase D – Eliminate in-process vLLM (`vllm_local`) backend
+
+Goal: fully decouple Chainette from the heavy `vllm` python import. All inference goes through **HTTP** (`vllm_api`). This unlocks running Chainette on CPU-only machines while models live in GPU servers.
+
+New TODOs (continue incremental tick-box style):
+
+- [x] **16. Delete `vllm_local` backend path in `engine/registry.py`**  
+      • Remove `_create_vllm_engine` and any `from vllm import LLM` import.  
+      • Drop helper `_is_vllm_model`.
+- [x] **17. Mark `vllm` as *optional* in `pyproject.toml`**  
+      ```
+      [tool.poetry.extras]
+      vllm = ["vllm>=0.4.2"]
+      ```
+      Core install (`pip install chainette`) should no longer pull CUDA wheels.
+- [x] **18. Update tests**  
+      • Remove / rewrite tests that instantiate in-proc vLLM.  
+      • Ensure test suite passes when `import vllm` raises `ModuleNotFoundError`.
+- [x] **19. Implement `chainette warmup` CLI helper**  
+      Spawns `vllm serve <hf_repo>` (same as `python -m vllm.entrypoints.openai.api_server`) in a background *subprocess* and prints the base URL.  
+      Loads a chain definition (py or yaml), instantiates all *non-lazy* engines, triggering any required server spin-up.  
+      Gracefully warns if required back-end extras (e.g. `vllm`) are missing.
+- [x] **20. Runtime guard**  
+      At import time, raise clear `ImportError` only if user tries to run `serve-vllm` without the optional extra. Rest of Chainette must work fine w/out `vllm`.
+- [x] **21. Docs & README**
 
 -----------------------------------------------------------------------------
 ## 6 – Risks & Mitigations
@@ -240,7 +262,7 @@ New TODOs (continue incremental tick-box style):
 
 | Term | Meaning |
 |------|---------|
-| **Backend** | Logical type of engine implementation (openai, vllm_api, ollama_api, vllm_local). |
+| **Backend** | Logical type of engine implementation (openai, vllm_api, ollama_api). |
 | **EngineClient** | Thin wrapper with `.generate()` bridging Chainette ↔ HTTP API. |
 | **Structured Output** | The practice of forcing LLMs to emit JSON conforming to a Pydantic schema. |
 
