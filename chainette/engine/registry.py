@@ -66,6 +66,9 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
                 self._engine = self._create_vllm_engine()
             elif self.backend == "ollama":
                 self._engine = self._create_ollama_engine()
+            elif self.backend == "openai":
+                from chainette.engine.http_client import OpenAIClient
+                self._engine = OpenAIClient(self.endpoint, self.api_key, self.model)
             else:
                 raise ValueError(f"Unsupported backend '{self.backend}'.")
         return self._engine

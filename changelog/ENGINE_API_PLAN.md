@@ -143,8 +143,25 @@ Caching is optional ⇒ `EnginePool` is demoted to tiny dict of BaseHTTPClient.
       endpoint: Optional[str] = None
       api_key: Optional[str] = None
   ```
-- [ ] **3. Create module `engine/http_client.py` with `BaseHTTPClient` + `OpenAIClient`**
-- [ ] **4. Update `registry.EngineConfig.engine` to return `OpenAIClient` when backend == "openai"**
+- [x] **3. Create module `engine/http_client.py` with `BaseHTTPClient` + `OpenAIClient`**
+  ```python
+  # chainette/engine/http_client.py (excerpt)
+  class OpenAIClient(BaseHTTPClient):
+      def generate(self, *, prompts: List[str], sampling_params=None):
+          resp = self._client.chat.completions.create(
+              model=self.model,
+              messages=[{"role": "user", "content": prompts[0]}],
+              response_format={"type": "json_object"},
+          )
+          text = resp.choices[0].message.content
+          return [_RequestOutput(text)]
+  ```
+  and wired in `registry.EngineConfig.engine`:
+  ```python
+  elif self.backend == "openai":
+      from chainette.engine.http_client import OpenAIClient
+  ```
+- [x] **4. Update `registry.EngineConfig.engine` to return `OpenAIClient` when backend == "openai"**
 - [ ] **5. Guard `GuidedDecodingParams` & `enable_reasoning` in `Step.__init__`**
 - [ ] **6. Write tests `tests/test_openai_client.py` with `respx` mocks**
 - [ ] **7. Update CLI docs & README (OpenAI usage)**
