@@ -1,7 +1,7 @@
 from importlib import reload
 
 from chainette.utils.events import publish, StepTotalItems, BatchFinished
-import chainette.utils.logging_v3 as log
+import chainette.utils.logging as log
 
 
 def test_progress_events_monotonic():

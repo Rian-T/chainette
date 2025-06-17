@@ -208,7 +208,7 @@ Implementation tasks (add to TODO checklist):
 - [ ] 13. CLI `--no-icons`, `--max-branches` flags forward to tree builder.
 - [ ] 14. Live badge updates: expose `update_step_badge(step_id, count)` in
         `logging_v3` and call from Executor after each batch.
-- [ ] 15. Snapshot test rendering with unicode + ascii modes.
+- [x] 15. Snapshot test rendering with unicode + ascii modes.
 
 -----------------------------------------------------------------------------
 ### End-of-File 

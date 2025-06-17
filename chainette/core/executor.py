@@ -80,6 +80,14 @@ class Executor:  # noqa: D101
 
                     publish(BatchFinished(step_id=obj.id, batch_no=batch_no, count=len(batch_inp)))
 
+                    # Optional live badge update
+                    try:
+                        from chainette.utils.logging import update_step_badge  # noqa: WPS433
+
+                        update_step_badge(obj.id, processed=(batch_no + 1) * len(batch_inp))
+                    except Exception:
+                        pass
+
                     # Fallback: when parsing fails, Step may return fewer outputs.
                     # In that case, keep original inputs/histories aligned.
                     if outs:
@@ -176,6 +184,14 @@ class Executor:  # noqa: D101
                     outs, hist_out = obj.execute(batch_inp, batch_hist, writer, debug=debug)
 
                     publish(BatchFinished(step_id=obj.id, batch_no=batch_no, count=len(batch_inp)))
+
+                    # Optional live badge update
+                    try:
+                        from chainette.utils.logging import update_step_badge  # noqa: WPS433
+
+                        update_step_badge(obj.id, processed=(batch_no + 1) * len(batch_inp))
+                    except Exception:
+                        pass
 
                     if outs:
                         new_inputs.extend(outs)

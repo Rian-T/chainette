@@ -1,5 +1,5 @@
 def test_dag_tree_snapshot(capsys):
-    from chainette.utils.logging_v3 import show_dag_tree
+    from chainette.utils.logging import show_dag_tree
 
     step_ids = ["a", "b", "parallel_branches", "c"]
     show_dag_tree(step_ids)

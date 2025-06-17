@@ -198,3 +198,7 @@ Chainette must remain a **tiny (~≤500 LOC core)**, approachable codebase:
     dec_branch = Branch(name="dec_branch", steps=[dec_node]).join("dec")
     inc_dec_chain = Chain(name="Increment/Decrement Join Demo", steps=[[inc_branch, dec_branch]])
     ```
+
+## 4 – Alignment with Codebase Cleanup (`code-cleanup` branch)
+
+The **Codebase Cleanup & Example Overhaul Plan** (`CODE_CLEANUP_PLAN.md`) runs in parallel and is intentionally **non-functional** (organisation-only).  It must land *before* any future elegance refactors that depend on leaner utils and the new example tree.  Always rebase `elegance` branch on top of `code-cleanup` once the cleanup checklist reaches 100 % completion.

@@ -79,3 +79,8 @@ secrets.json
 # Log files
 *.log
 logs/
+
+# Chainette run artifacts
+/_out_*/
+/_tmp_*/
++/inputs*.jsonl

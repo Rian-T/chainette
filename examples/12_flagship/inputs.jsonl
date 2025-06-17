@@ -1,0 +1,2 @@
+{"description": "API latency spikes observed after deploying new version of authentication service. Users experiencing 502 errors."}
+{"description": "Data ingestion pipeline failing nightly jobs due to unknown parsing exception in step 3."} 

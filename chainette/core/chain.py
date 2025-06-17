@@ -91,7 +91,7 @@ class Chain:
         if show_ui:
             try:
                 from chainette.utils.banner import ChainetteBanner
-                from chainette.utils.logging_v3 import show_dag_tree
+                from chainette.utils.logging import show_dag_tree
 
                 ChainetteBanner().display()  # type: ignore[call-arg]
                 show_dag_tree(self)

@@ -185,8 +185,10 @@ class StreamWriter:  # noqa: D101
     # ------------------------------------------------------------------ #
 
     def add_node_to_graph(self, node_info: dict[str, Any]):  # noqa: D401
-        """Legacy no-op: StreamWriter does not store the exec graph yet."""
-        # TODO: persist lightweight execution graph as line-delimited JSON.
+        """Legacy no-op: StreamWriter does not store the exec graph yet.
+
+        Placeholder: StreamWriter currently skips writing the execution graph.
+        """
         return None
 
     def set_chain_name(self, name: str):  # noqa: D401

@@ -1,0 +1,5 @@
+# Placeholder YAML pipeline – to be implemented in checklist item 12
+name: Customer Support Bot
+batch_size: 1
+steps:
+  - examples.08_chatbot_yaml.steps:answer_step 
