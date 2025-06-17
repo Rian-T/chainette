@@ -146,6 +146,7 @@ class Step(Node):
             raw_outputs = eng.generate(prompts=prompts, sampling_params=self.sampling, step_id=self.id)
 
         parsed_outputs: List[BaseModel] = []
+        parsed_records_for_writer: List[Any] = []
         new_histories: List[Dict[str, Any]] = []
 
         for hist, raw in zip(item_histories, raw_outputs):
@@ -165,12 +166,19 @@ class Step(Node):
                     h[f"{self.id}_reasoning"] = reasoning
                 new_histories.append(h)
 
+                # Attach row_id for alignment if present in history
+                row_id = hist.get("row_id")
+                record = parsed.model_dump(mode="json")
+                if row_id is not None:
+                    record["row_id"] = row_id
+                parsed_records_for_writer.append(record)
+
                 # progress now handled in engine via advance updates
             except ValueError as e:
                 print(f"Warning: skipping item in step '{self.id}' due to parse error: {e}")
                 new_histories.append(hist.copy())
 
-        if writer is not None and self.yield_output and parsed_outputs:
-            writer.write_step(self.id, parsed_outputs)
+        if writer is not None and self.yield_output and parsed_records_for_writer:
+            writer.write_step(self.id, parsed_records_for_writer)
 
         return parsed_outputs, new_histories

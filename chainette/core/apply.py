@@ -68,7 +68,21 @@ class ApplyNode(Node, Generic[IN, OUT]):  # noqa: D101
 
         if writer is not None:
             writer.add_node_to_graph({"id": self.id, "name": self.name, "type": "Apply"})
-            writer.write_step(self.id, all_outputs)
+
+            # Attach row_id from histories if present for alignment in flattened output
+            records_for_writer: List[Any] = []
+            for out_obj, hist in zip(all_outputs, new_item_histories):
+                rec = (
+                    out_obj.model_dump(mode="json")
+                    if isinstance(out_obj, BaseModel)
+                    else out_obj
+                )
+                rid = hist.get("row_id")
+                if rid is not None:
+                    rec["row_id"] = rid
+                records_for_writer.append(rec)
+
+            writer.write_step(self.id, records_for_writer)
 
         return all_outputs, new_item_histories
 

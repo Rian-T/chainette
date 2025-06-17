@@ -36,7 +36,7 @@ class Executor:  # noqa: D101
         debug: bool = False,
     ) -> List[Dict[str, Any]]:
         """Execute *graph* on *inputs*; return final histories."""
-        histories: List[Dict[str, Any]] = [{"chain_input": inp} for inp in inputs]
+        histories: List[Dict[str, Any]] = [{"chain_input": inp, "row_id": idx} for idx, inp in enumerate(inputs)]
         nodes = self.graph.nodes()
         active_cfg = None  # track current engine cfg for maybe_stop
         if debug:
@@ -139,9 +139,7 @@ class Executor:  # noqa: D101
         for very large datasets while still allowing downstream streaming.
         """
 
-        histories: List[Dict[str, Any]] = [
-            {"chain_input": inp} for inp in inputs
-        ]
+        histories: List[Dict[str, Any]] = [{"chain_input": inp, "row_id": idx} for idx, inp in enumerate(inputs)]
 
         nodes = self.graph.nodes()
         active_cfg = None  # track current engine cfg for maybe_stop

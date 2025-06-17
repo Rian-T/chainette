@@ -1,9 +1,0 @@
-{
-  "execution_info": {
-    "chain_name": "echo-chain",
-    "run_dir": "/Users/rtouchen/dev/chainette/_tmp_ollama_single"
-  },
-  "format": "jsonl",
-  "generated_by": "chainette v0.1.0",
-  "splits": []
-}

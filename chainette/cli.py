@@ -278,9 +278,8 @@ def run(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        if not quiet:
-            from chainette.utils.banner import ChainetteBanner  # noqa: WPS433
-            ChainetteBanner(console=console).display()
+        from chainette.utils.banner import ChainetteBanner  # noqa: WPS433
+        ChainetteBanner(console=console).display()
 
         console.print(
             f"[bold]Chain:[/] {chain_obj.name} • [bold]Inputs:[/] {len(inputs_data)} • "
@@ -298,7 +297,7 @@ def run(
 
             writer = RunWriter(output_dir, max_lines_per_file=max_lines_per_file, fmt="jsonl")
 
-        if not quiet and not json_logs:
+        if not json_logs:
             from chainette.utils.logging import show_dag_tree  # noqa: WPS433
             from chainette.utils.dag import RenderOptions
 
@@ -318,6 +317,7 @@ def run(
             def _log_bf(e):
                 print(_json.dumps({"event": "batch_finished", **e.__dict__}))
 
+        # Call chain run without internal UI to avoid duplicate banner/tree
         chain_obj.run(
             inputs=inputs_data,
             writer=writer,
@@ -325,19 +325,15 @@ def run(
             fmt="jsonl",  # Currently hardcoded, could be an option
             generate_flattened_output=generate_flattened,
             max_lines_per_file=max_lines_per_file,
+            show_ui=False,
         )
 
-        if not quiet and not json_logs:
-            from chainette.utils.logging import stop as _stop_progress
-
-            _stop_progress()
-
-        console.print("[bold green]Chain execution finished successfully![/]")
+        console.print("\n[bold green]Chain execution finished successfully![/]")
         console.print(f"Results written to {output_dir}")
     except Exception as e:
-        console.print(f"[bold red]Error during chain execution: {e}[/]")
+        console.print(f"\n[bold red]Error during chain execution: {e}[/]")
         import traceback
-        console.print(f"[dim]{traceback.format_exc()}[/dim]")
+        console.print(f"\n[dim]{traceback.format_exc()}[/dim]")
         raise typer.Exit(code=1)
 
 # --------------------------------------------------------------------------- #

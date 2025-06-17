@@ -132,23 +132,54 @@ def flatten_datasetdict(ds_dict: DatasetDict) -> Dataset:
     if not ds_dict:
         return Dataset.from_list([])
 
-    # Check if all datasets have the same length
-    iter_ds = iter(ds_dict.values())
-    first_len = len(next(iter_ds))
-    if not all(len(ds) == first_len for ds in iter_ds):
-        lengths = {k: len(v) for k, v in ds_dict.items()}
-        raise ValueError(f"Cannot flatten datasets with different lengths: {lengths}")
+    # Determine minimum length; keep only splits at this length.
+    lengths = {k: len(v) for k, v in ds_dict.items()}
+    min_len = min(lengths.values())
 
-    flat_rows = []
-    keys = list(ds_dict.keys())
-    datasets = list(ds_dict.values())
+    if len(set(lengths.values())) > 1:
+        dropped = {k: l for k, l in lengths.items() if l > min_len}
+        print(
+            "Warning: differing split sizes. Dropping splits "
+            f"with greater length: {dropped}. Flatten will use splits sized {min_len}."
+        )
 
-    for i in range(first_len):
-        merged_row = {}
-        for key_idx, key in enumerate(keys):
-            row = datasets[key_idx][i]
-            for col_name, value in row.items():
-                merged_row[f"{key}.{col_name}"] = value
-        flat_rows.append(merged_row)
+    # Attempt smarter join: use first common column across splits as join key
+    first_split = next(iter(ds_dict.values()))
+    common_cols = set(first_split.column_names)
+    for ds in ds_dict.values():
+        common_cols &= set(ds.column_names)
+    join_key = next(iter(common_cols)) if common_cols else None
+
+    if join_key:
+        # Build lookup tables for each split
+        lookups = {k: {row[join_key]: row for row in v} for k, v in ds_dict.items() if len(v) >= min_len}
+
+        reference_split = min(lookups.keys(), key=lambda k: len(lookups[k]))
+        flat_rows: list[dict[str, Any]] = []
+        for val, ref_row in lookups[reference_split].items():
+            if all(val in lookups[split] for split in lookups):
+                merged: dict[str, Any] = {}
+                for split, table in lookups.items():
+                    row = table[val]
+                    for col_name, value in row.items():
+                        if col_name == "row_id":
+                            merged["row_id"] = value
+                        else:
+                            merged[f"{split}.{col_name}"] = value
+                flat_rows.append(merged)
+    else:
+        # Fallback to positional join on min_len splits
+        kept_keys = [k for k, l in lengths.items() if l >= min_len]
+        flat_rows: list[dict[str, Any]] = []
+        for i in range(min_len):
+            merged_row: dict[str, Any] = {}
+            for key in kept_keys:
+                row = ds_dict[key][i]
+                for col_name, value in row.items():
+                    if col_name == "row_id":
+                        merged_row["row_id"] = value
+                    else:
+                        merged_row[f"{key}.{col_name}"] = value
+            flat_rows.append(merged_row)
 
     return Dataset.from_list(flat_rows)
