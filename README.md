@@ -199,6 +199,33 @@ Quick demo:
 poetry run chainette run examples/runner/huge_batch_demo.py demo_chain inputs_huge.jsonl out --stream-writer
 ```
 
+## DAG Visualisation & Live Progress  🖼️
+
+Chainette ships with a Rich-powered UI:
+
+```
+Execution DAG
+└── parallel × 2
+    ├── fr_branch
+    │   └── 📄 translate_fr
+    └── es_branch
+        └── 📄 translate_es
+qa_step  ███████▏ 70% •  7/10 • 0:03
+```
+
+Key features
+1. Icons for node types (📄 Apply / 🤖 Step / 🪢 Branch root, etc.).
+2. Collapse long parallel groups with "N more…".
+3. Flags:
+   * `--no-icons` → plain ASCII.
+   * `--max-branches 3` → limit displayed branches.
+4. Live progress bars per step with `completed/total` badge.
+
+Print tree only:
+```bash
+poetry run chainette inspect-dag examples/translate.py my_chain --no-icons
+```
+
 ## CLI Usage
 
 Chainette provides a simple CLI for managing LLM engines:

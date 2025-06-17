@@ -168,4 +168,13 @@ with EngineBroker.acquire("gemma_ollama") as eng:
 ```
 Executor calls `EngineBroker.flush(force=True)` at run end.
 
+### DAG UI & Progress Bars (2025)
+
+• Rich `Tree` visualises the execution graph with icons and colours.
+• Flags:
+  – `--no-icons` (ASCII/monochrome)  
+  – `--max-branches N` collapse large parallel wrappers.
+• Live progress per Step: bar + `completed/total` badge, updated after each batch.
+• `RenderOptions` allows programmatic control (icons_on, max_branches).
+
 End-Of-File 
