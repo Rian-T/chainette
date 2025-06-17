@@ -297,7 +297,7 @@ def run(
             writer = RunWriter(output_dir, max_lines_per_file=max_lines_per_file, fmt="jsonl")
 
         if not quiet and not json_logs:
-            from chainette.utils.logging_v2 import show_dag_tree  # noqa: WPS433
+            from chainette.utils.logging_v3 import show_dag_tree  # noqa: WPS433
 
             show_dag_tree(chain_obj)
 
@@ -324,7 +324,7 @@ def run(
         )
 
         if not quiet and not json_logs:
-            from chainette.utils.logging_v2 import stop as _stop_progress
+            from chainette.utils.logging_v3 import stop as _stop_progress
 
             _stop_progress()
 
@@ -412,7 +412,7 @@ def inspect_dag(
     console.print(f"[bold]Chain:[/] {chain_obj.name} • [bold]DAG ONLY[/]")
     console.print("")
 
-    from chainette.utils.logging_v2 import show_dag_tree  # noqa: WPS433
+    from chainette.utils.logging_v3 import show_dag_tree  # noqa: WPS433
 
     show_dag_tree(chain_obj)
     console.print(f"[green]DAG inspection complete – {len(chain_obj.steps)} top-level nodes shown.[/]")
