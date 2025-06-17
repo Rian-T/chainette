@@ -1,0 +1,18 @@
+engines:
+  - name: qwen2.5_32b_instruct
+    model: /lustre/fsn1/projects/rech/rua/uvb79kr/Qwen--Qwen2.5-32B-Instruct
+    dtype: bfloat16
+    gpu_memory_utilization: 0.9
+    enable_reasoning: false
+    lazy: false
+    max_model_len: 12338
+    devices: [0]
+  - name: qwen3_30b_a3b_reasoning
+    model: /lustre/fsn1/projects/rech/rua/uvb79kr/Qwen--Qwen3-30B-A3B
+    dtype: bfloat16
+    gpu_memory_utilization: 0.9
+    enable_reasoning: true
+    reasoning_parser: deepseek_r1
+    lazy: false
+    max_model_len: 8192
+    devices: [1]

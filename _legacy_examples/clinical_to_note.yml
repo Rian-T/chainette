@@ -1,0 +1,4 @@
+name: Clinical Case to Note Transformation
+batch_size: 10
+steps:
+  - examples.clinical_to_note:clinical_note_generation_step 

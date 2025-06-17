@@ -1,0 +1,14 @@
+{
+  "execution_order": [
+    {
+      "id": "filter",
+      "name": "Filter Other Cases",
+      "type": "Apply"
+    },
+    {
+      "id": "upload",
+      "name": "Upload to HF",
+      "type": "Apply"
+    }
+  ]
+}
