@@ -172,7 +172,7 @@ Caching is optional ⇒ `EnginePool` is demoted to tiny dict of BaseHTTPClient.
 - [x] **7. Update CLI docs & README (OpenAI usage)**
 
 ### Phase B – vLLM Serve
-- [ ] **8. Implement `VLLMClient` (+ unit tests)**
+- [x] **8. Implement `VLLMClient` (+ unit tests)**
 - [ ] **9. Add CLI helper `chainette engines warmup vllm_api` (spins docker) – optional**
 - [ ] **10. Benchmark parity vs local vLLM (doc in `BENCHMARK.md`)**
 
