@@ -73,8 +73,8 @@ span_step = Step(
     name="Locate Info Spans",
     input_model=ClinicalNote,
     output_model=SpanInfo,
-    engine_name="o4-mini",
-    sampling=SamplingParams(temperature=1.0),
+    engine_name="openai_mini",
+    sampling=SamplingParams(temperature=0.0),
     system_prompt=(
         "Pour chaque variable d'information clinique (sexe, âge, dates, etc.), "
         "renvoyez l'extrait exact (span) du texte sans modification de la note qui contient cette information. "

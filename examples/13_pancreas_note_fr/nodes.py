@@ -50,7 +50,7 @@ class UploadNode(ApplyNode):
         rows = []
         for span_rec, hist in zip(inputs, item_histories):
             # Get original case & note from history
-            clinical_case = getattr(hist.get("chain_input"), "text", None)
+            clinical_case = getattr(hist.get("classify"), "text", None) or getattr(hist.get("filter"), "text", "")
             clinical_note = getattr(hist.get("note"), "note", "")
 
             # Variables string (non-null)

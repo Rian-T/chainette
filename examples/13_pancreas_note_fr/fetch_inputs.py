@@ -10,7 +10,7 @@ OUT = Path(__file__).parent / "inputs.jsonl"
 
 ds = load_dataset("rntc/open-clinical-cases-pubmed-comet", split="fr_translated", streaming=False)
 
-subset = ds.select(range(10000))
+subset = ds.select(range(1000))
 with OUT.open("w", encoding="utf-8") as f:
     for i, row in enumerate(subset):
         f.write(json.dumps({"text": row["text"]}, ensure_ascii=False) + "\n")
