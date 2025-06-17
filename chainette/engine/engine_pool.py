@@ -39,6 +39,7 @@ class EnginePool:  # noqa: D101
 
         cfg = get_engine_config(name)
         eng = cfg.engine  # lazy-load happens inside registry
+
         self._lru[name] = _Entry(eng)
         self._cache[name] = eng
         if len(self._lru) > self.max_size:
