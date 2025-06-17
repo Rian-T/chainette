@@ -95,6 +95,9 @@ class Step(Node):
         self.emoji = emoji or ""
         self.yield_output = yield_output
 
+        # Internal counter for progress tracking across batches
+        self._completed_items: int = 0
+
         json_schema = self.output_model.model_json_schema()
         # Guided decoding not supported by the OpenAI backend (it uses a different
         # structured-output mechanism). Attach guided params only for back-ends
@@ -140,7 +143,7 @@ class Step(Node):
         from chainette.engine.broker import EngineBroker
 
         with EngineBroker.acquire(self.engine_name) as eng:
-            raw_outputs = eng.generate(prompts=prompts, sampling_params=self.sampling)
+            raw_outputs = eng.generate(prompts=prompts, sampling_params=self.sampling, step_id=self.id)
 
         parsed_outputs: List[BaseModel] = []
         new_histories: List[Dict[str, Any]] = []
@@ -161,6 +164,8 @@ class Step(Node):
                 if reasoning:
                     h[f"{self.id}_reasoning"] = reasoning
                 new_histories.append(h)
+
+                # progress now handled in engine via advance updates
             except ValueError as e:
                 print(f"Warning: skipping item in step '{self.id}' due to parse error: {e}")
                 new_histories.append(hist.copy())

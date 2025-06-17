@@ -65,6 +65,7 @@ def get(level: str = "info") -> Logger:  # noqa: D401
 _progress: Progress | None = None
 _tasks: Dict[str, int] = {}
 _counts: Dict[str, int] = defaultdict(int)
+_per_item_steps: set[str] = set()
 
 
 def _ensure_progress() -> Progress:  # noqa: D401
@@ -100,6 +101,9 @@ def _on_total(evt: StepTotalItems):  # noqa: D401 – event hook
 
 @subscribe(BatchFinished)
 def _on_batch_finish(evt: BatchFinished):  # noqa: D401 – event hook
+    if evt.step_id in _per_item_steps:
+        # progress already advanced per item – skip batch advance to avoid double-count
+        return
     prog = _ensure_progress()
     task_id = _tasks.get(evt.step_id)
     if task_id is not None:
@@ -136,10 +140,24 @@ def stop():  # noqa: D401
 # Badge helper – optional call from Executor for custom updates
 # --------------------------------------------------------------------------- #
 
-def update_step_badge(step_id: str, processed: int):  # noqa: D401
-    """Manually update *completed* count for *step_id*."""
+def update_step_badge(step_id: str, *, completed: int | None = None, advance: int | None = None):  # noqa: D401
+    """Update progress for *step_id*.
+
+    Parameters
+    ----------
+    completed : int | None
+        If given, sets the completed counter to this absolute value.
+    advance : int | None
+        If given, increments the completed counter by this amount.
+    """
     if _progress is None:
         return
     task_id = _tasks.get(step_id)
-    if task_id is not None:
-        _progress.update(task_id, completed=processed) 
+    if task_id is None:
+        return
+
+    if advance is not None:
+        _per_item_steps.add(step_id)
+        _progress.update(task_id, advance=advance)
+    elif completed is not None:
+        _progress.update(task_id, completed=completed) 

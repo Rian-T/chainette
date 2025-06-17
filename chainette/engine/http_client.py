@@ -10,9 +10,10 @@ where *LLMOutput* only needs to expose ``outputs[0].text`` (optionally ``reasoni
 Keeping these wrappers tiny allows painless addition of new back-ends.
 """
 
-from typing import List, Any, Optional
+from typing import List, Any, Optional, Sequence
 from dataclasses import dataclass
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Local fallback if the OpenAI package is missing – we raise at runtime.
 try:
@@ -53,17 +54,37 @@ class BaseHTTPClient:  # noqa: D101 – base contract
         return {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
 
     # ------------------------------------------------------------------ #
-    def generate(self, *, prompts: List[str], sampling_params: Any | None = None):  # noqa: D401
+    def generate(self, *, prompts: List[str], sampling_params: Any | None = None, step_id: str | None = None):  # noqa: D401
         """Shared generate that delegates to :meth:`_send_chat` per prompt."""
         out: List[_RequestOutput] = []
         temperature: float | None = None
         if sampling_params is not None and hasattr(sampling_params, "temperature"):
             temperature = sampling_params.temperature  # type: ignore[attr-defined]
 
-        for p in prompts:
-            messages = p if isinstance(p, list) else [{"role": "user", "content": p}]
-            text = self._send_chat(messages=messages, temperature=temperature)
-            out.append(_RequestOutput(text))
+        # Build message payloads first to preserve order
+        msgs: List[Sequence[dict]] = [p if isinstance(p, list) else [{"role": "user", "content": p}] for p in prompts]
+
+        # Fire requests concurrently – small thread pool is enough because network-bound
+        results: List[Optional[str]] = [None] * len(msgs)
+
+        def _run(idx: int, m: Sequence[dict]):
+            txt = self._send_chat(messages=list(m), temperature=temperature)
+            if step_id is not None:
+                try:
+                    from chainette.utils.logging import update_step_badge  # noqa: WPS433
+
+                    update_step_badge(step_id, advance=1)
+                except Exception:
+                    pass
+            return idx, txt
+
+        with ThreadPoolExecutor(max_workers=min(8, len(msgs))) as pool:
+            futures = [pool.submit(_run, i, m) for i, m in enumerate(msgs)]
+            for fut in as_completed(futures):
+                idx, txt = fut.result()
+                results[idx] = txt
+
+        out = [_RequestOutput(txt or "") for txt in results]
         return out
 
     # ------------------------------------------------------------------ #
