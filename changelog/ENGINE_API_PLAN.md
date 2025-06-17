@@ -209,7 +209,7 @@ New TODOs (continue incremental tick-box style):
 - [ ] **21. Docs & README**  
       • Replace references to "in-process vLLM" with "vLLM Serve".  
       • Add install snippet: `pip install chainette[vllm]` for the CLI helper.
-- [ ] **22. Deprecation note**  
+- [x] **22. Deprecation note**  
       Emit `UserWarning` for configs still using `backend: vllm_local` pointing users to migrate:  `backend: vllm_api  endpoint: http://localhost:8000/v1`.
 
 -----------------------------------------------------------------------------
