@@ -124,6 +124,8 @@ Caching is optional ⇒ `EnginePool` is demoted to tiny dict of BaseHTTPClient.
    2. Map sampling params (temperature, top_p).
    3. Keep existing in-proc wrapper for cases where user still wants local.
 
+4. **Phase D – Eliminate in-process vLLM (`vllm_local`) backend**
+
 -----------------------------------------------------------------------------
 ## 5 – Refactor Roadmap / TODO Checklist
 (We follow *one-item-at-a-time* loop: implement → test → tick → paste snippet.)
@@ -180,10 +182,34 @@ Caching is optional ⇒ `EnginePool` is demoted to tiny dict of BaseHTTPClient.
 - [x] **11. Implement `OllamaHTTPClient` & reuse existing prompt mapping**
 - [x] **12. Consolidate duplicated code into `BaseHTTPClient._chat(payload)`**
 
-### Cleanup & Deprecation
-- [x] **13. Deprecate `enable_reasoning` for backends that don't support**
-- [x] **14. Remove vLLM in-proc path (may live behind `backend: vllm_local`)**
-- [ ] **15. Update `ELEGANCE_PLAN.md` & docs**
+### Phase D – Eliminate in-process vLLM (`vllm_local`) backend
+
+Goal: fully decouple Chainette from the heavy `vllm` python import. All inference goes through **HTTP** (`vllm_api`). This unlocks running Chainette on CPU-only machines while models live in GPU servers / docker.
+
+New TODOs (continue incremental tick-box style):
+
+- [ ] **16. Delete `vllm_local` backend path in `engine/registry.py`**  
+      • Remove `_create_vllm_engine` and any `from vllm import LLM` import.  
+      • Drop helper `_is_vllm_model`.
+- [x] **17. Mark `vllm` as *optional* in `pyproject.toml`**  
+      ```
+      [tool.poetry.extras]
+      vllm = ["vllm>=0.4.2"]
+      ```
+      Core install (`pip install chainette`) should no longer pull CUDA wheels.
+- [x] **18. Update tests**  
+      • Remove / rewrite tests that instantiate in-proc vLLM.  
+      • Ensure test suite passes when `import vllm` raises `ModuleNotFoundError`.
+- [ ] **19. Implement `chainette engines serve-vllm` CLI helper**  
+      Spawns `vllm serve <hf_repo>` (same as `python -m vllm.entrypoints.openai.api_server`) in a background *subprocess* and prints the base URL.  
+      Gracefully warns if `vllm` executable is missing.
+- [ ] **20. Runtime guard**  
+      At import time, raise clear `ImportError` only if user tries to run `serve-vllm` without the optional extra. Rest of Chainette must work fine w/out `vllm`.
+- [ ] **21. Docs & README**  
+      • Replace references to "in-process vLLM" with "vLLM Serve".  
+      • Add install snippet: `pip install chainette[vllm]` for the CLI helper.
+- [ ] **22. Deprecation note**  
+      Emit `UserWarning` for configs still using `backend: vllm_local` pointing users to migrate:  `backend: vllm_api  endpoint: http://localhost:8000/v1`.
 
 -----------------------------------------------------------------------------
 ## 6 – Risks & Mitigations
@@ -213,6 +239,124 @@ Caching is optional ⇒ `EnginePool` is demoted to tiny dict of BaseHTTPClient.
 | **EngineClient** | Thin wrapper with `.generate()` bridging Chainette ↔ HTTP API. |
 | **Structured Output** | The practice of forcing LLMs to emit JSON conforming to a Pydantic schema. |
 
+
+-----------------------------------------------------------------------------
+### Additional notes after vLLM docs review
+
+The official vLLM documentation confirms:
+• The **OpenAI-compatible server** is started with:
+  `python -m vllm.entrypoints.openai.api_server --model <repo> --port 8000`
+  (optional `--dtype`, `--gpu-memory-utilization`, etc.).
+• A server can host **exactly one model**. Spawning a new model on the same
+  port will error.
+• The server blocks the foreground thread – therefore **we must launch it in a
+  background `subprocess.Popen`** and kill it via `proc.terminate()` /
+  `proc.wait()`.
+• HTTP health-check endpoint `/v1/models` (alias `/models` on some versions) returns the loaded model list; we can
+  call it to decide whether the server is already up and usable.
+
+These points align with Phase D above. No further API changes are required.
+
+### Lifecycle semantics – *lazy* vs *persistent* engines
+
+We extend `register_engine` with an optional flag:
+
+```python
+register_engine(name="my_model", model="mistralai/Mixtral-8x7B", backend="vllm_api", lazy=True)
+```
+
+• `lazy=True` (default):
+  – Chainette spins the vLLM server **only when** the first `Step` requiring
+    this engine executes.  
+  – Immediately after the *last* contiguous segment of steps using that engine
+    finishes, Chainette terminates the subprocess and waits for clean exit
+    before continuing.
+
+• `lazy=False` (persistent):
+  – On `Chain.run`, we scan the DAG; for every engine with `lazy=False` we start
+    the server upfront and keep it alive until the run ends.
+
+• If `endpoint` is supplied **or** the default port already answers `/v1/models`
+  with the requested model, Chainette **reuses** the existing server instead of
+  spawning a new one.
+
+### New implementation tasks
+
+- [ ] **23. Extend `EngineConfig`**  
+      Add `lazy: bool = True` and `port: int | None`.  
+      Infer default port = 8000 + *index* to avoid clashes when auto-spawning.
+- [ ] **24. Add `engine.process` field** to cache the `subprocess.Popen` handle
+      when Chainette spawns a server.
+- [ ] **25. Implement `EngineProcessManager`**  
+      Tiny helper (< 80 LOC) exposing:  
+      `ensure_running(cfg: EngineConfig) -> str` (returns base_url) and
+      `maybe_stop(cfg: EngineConfig)`.
+- [ ] **26. Modify `Executor` logic**  
+      • If step.engine.lazy → call `ensure_running` just-in-time and
+        `maybe_stop` once the next step uses a different engine.  
+      • If any engine.lazy is False → start all at beginning, stop all at end.
+- [ ] **27. CLI helper `engines serve-vllm` → rename to `engines warmup-vllm`**  
+      Internally forwards to `EngineProcessManager.ensure_running`.
+- [ ] **28. Unit tests** for process lifecycle with a **fake Python script**
+      (`tests/fake_vllm_server.py`) simulating `/v1/models`.
+- [ ] **29. Remove or adapt `EnginePool`** – no in-proc caching needed; pool is
+      now a map *engine_name → BaseHTTPClient* (HTTP) + optional process handle.
+- [ ] **30. Documentation update**  
+      Add a *Lifecycle* section describing lazy vs persistent behaviour.
+
+-----------------------------------------------------------------------------
+### Advanced vLLM serve flags (reasoning, model-specific tweaks, GPU topology)
+
+The 0.9.x CLI exposes many feature flags that Chainette users may want to
+surface when we autospawn `vllm serve`.  The most common are:
+
+* `--enable-reasoning` & `--reasoning-parser …` – activate built-in structured
+  reasoning back-end (e.g. `deepseek_r1`).
+* Mistral-family quirks:
+  `--tokenizer_mode mistral  --config_format mistral  --load_format mistral`.
+* Parallelism / device placement:
+  `--tensor-parallel-size <N>` to shard across **N GPUs inside one host**.
+  Users often accompany this with the env-var `CUDA_VISIBLE_DEVICES=…` to pick
+  which GPU IDs participate (e.g. `0,1` → two way TP on the first two cards).
+
+Design decision
+----------------
+Expose a **pass-through** field on `EngineConfig`:
+```yaml
+extra_serve_flags:
+  - "--enable-reasoning"
+  - "--reasoning-parser=deepseek_r1"
+  - "--tensor-parallel-size=2"
+  - "--tokenizer_mode=mistral"
+  - "--config_format=mistral"
+  - "--load_format=mistral"
+  env:
+    CUDA_VISIBLE_DEVICES: "0,1"
+```
+• The list is appended verbatim after `vllm serve <model>` when we spawn the
+  subprocess.
+• Optional nested `env:` dict lets users inject/override environment variables
+  for that server process only (e.g. `CUDA_VISIBLE_DEVICES`).
+
+Implementation tasks
+--------------------
+- [ ] **31. Extend `EngineConfig`**  
+      Add `extra_serve_flags: List[str] = field(default_factory=list)` and
+      `extra_env: Dict[str,str] = field(default_factory=dict)`.
+- [ ] **32. Update `EngineProcessManager.ensure_running`**  
+      • Build the command line as:  
+        `cmd = ["vllm", "serve", cfg.model, *cfg.extra_serve_flags]`  
+      • Pass `env={**os.environ, **cfg.extra_env}` to `subprocess.Popen`.
+- [ ] **33. Add validation helper**  
+      Warn (but allow) if user passes mutually exclusive flags like
+      `--dtype` twice.
+- [ ] **34. Documentation & examples**  
+      • Provide YAML snippet in README "Advanced – reasoning & multi-GPU".  
+      • Docs section explaining that any vLLM `serve` flag can be forwarded via
+        `extra_serve_flags`.
+
+These additions keep the core API minimal while giving power-users full control
+over vLLM's rapidly evolving flag set.
 
 -----------------------------------------------------------------------------
 ### End-of-File 

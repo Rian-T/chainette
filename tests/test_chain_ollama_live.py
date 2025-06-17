@@ -36,7 +36,7 @@ def test_chain_ollama_end_to_end():
 
     register_engine(
         name="ollama_live",
-        model="qwen2.5-instruct",  # ensure model pulled
+        model="gemma3:1b",  # ensure model pulled
         backend="ollama_api",
         endpoint=OLLAMA_URL,
     )

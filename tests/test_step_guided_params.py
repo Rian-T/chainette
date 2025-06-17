@@ -24,14 +24,14 @@ def test_guided_params_disabled_for_openai():
     assert getattr(step.sampling, "guided_decoding", None) is None
 
 
-def test_guided_params_enabled_for_vllm():
-    register_engine("local_vllm", model="qwen1.5-1b", backend="vllm_local")
+def test_guided_params_enabled_for_vllm_api():
+    register_engine("vserve", model="qwen1.5-1b", backend="vllm_api", endpoint="http://dummy:8000/v1")
     step = Step(
         id="s2",
         name="test2",
         input_model=DummyIn,
         output_model=DummyOut,
-        engine_name="local_vllm",
+        engine_name="vserve",
         sampling=SamplingParams(),
     )
     assert step.sampling.guided_decoding is not None 

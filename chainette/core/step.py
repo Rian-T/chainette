@@ -16,8 +16,31 @@ from chainette.core.node import Node
 from chainette.io.writer import RunWriter
 from chainette.utils.json_schema import generate_json_output_prompt
 
-from vllm import SamplingParams
-from vllm.sampling_params import GuidedDecodingParams
+try:
+    # Prefer the real vLLM classes when available.
+    from vllm import SamplingParams  # type: ignore
+    from vllm.sampling_params import GuidedDecodingParams  # type: ignore
+except (ModuleNotFoundError, ImportError):  # pragma: no cover – fallback when vllm extra not installed
+    from dataclasses import dataclass, field
+    from typing import List as _List, Optional as _Optional, Dict as _Dict, Any as _Any
+
+    @dataclass
+    class GuidedDecodingParams:  # noqa: D401
+        """Minimal stub providing the *json* attribute only."""
+
+        json: _Dict[str, _Any] | None = None
+
+    @dataclass
+    class SamplingParams:  # noqa: D401
+        """Lightweight replacement exposing the attrs Chainette relies on."""
+
+        temperature: float | None = None
+        top_p: _Optional[float] = None
+        max_tokens: _Optional[int] = None
+        stop: _List[str] = field(default_factory=list)
+        guided_decoding: 'GuidedDecodingParams | None' = None
+
+# Additional imports that depend on the presence of SamplingParams
 from chainette.utils.prompt import build_prompt
 from chainette.utils.parsing import parse_llm_json
 

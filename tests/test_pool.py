@@ -2,7 +2,7 @@ import types
 
 import pytest
 
-from chainette.engine.registry import LLM, register_engine, get_engine_config
+from chainette.engine.registry import register_engine
 from chainette.engine.pool import EnginePool
 
 
@@ -15,8 +15,8 @@ class DummyLLM:  # noqa: D101
 
 
 def test_engine_pool_lru(monkeypatch):
-    # Stub vllm.LLM to avoid heavy load
-    monkeypatch.setattr("chainette.engine.registry.LLM", DummyLLM)
+    # Stub VLLMClient so EnginePool doesn't attempt real HTTP calls
+    monkeypatch.setattr("chainette.engine.http_client.VLLMClient", DummyLLM)
 
     register_engine(name="e1", model="dummy-model")
     register_engine(name="e2", model="dummy-model")
