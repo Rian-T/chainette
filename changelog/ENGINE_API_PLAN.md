@@ -182,7 +182,7 @@ Caching is optional ⇒ `EnginePool` is demoted to tiny dict of BaseHTTPClient.
 
 ### Cleanup & Deprecation
 - [x] **13. Deprecate `enable_reasoning` for backends that don't support**
-- [ ] **14. Remove vLLM in-proc path (may live behind `backend: vllm_local`)**
+- [x] **14. Remove vLLM in-proc path (may live behind `backend: vllm_local`)**
 - [ ] **15. Update `ELEGANCE_PLAN.md` & docs**
 
 -----------------------------------------------------------------------------
