@@ -64,8 +64,7 @@ class Executor:  # noqa: D101
 
                 # Announce total items once for accurate progress UI
                 if len(inputs) > 0:
-                    total_batches = (len(inputs) + self.batch_size - 1) // self.batch_size
-                    publish(StepTotalItems(step_id=obj.id, total=total_batches))
+                    publish(StepTotalItems(step_id=obj.id, total=len(inputs)))
 
                 # Run in mini-batches managed here (Step ignores batch_size arg)
                 bs = self.batch_size if self.batch_size > 0 else len(inputs)
@@ -79,7 +78,7 @@ class Executor:  # noqa: D101
 
                     outs, hist_out = obj.execute(batch_inp, batch_hist, writer, debug=debug)
 
-                    publish(BatchFinished(step_id=obj.id, batch_no=batch_no, count=1))
+                    publish(BatchFinished(step_id=obj.id, batch_no=batch_no, count=len(batch_inp)))
 
                     # Fallback: when parsing fails, Step may return fewer outputs.
                     # In that case, keep original inputs/histories aligned.
@@ -160,8 +159,7 @@ class Executor:  # noqa: D101
 
                 # Announce total items once
                 if len(inputs) > 0:
-                    total_batches = (len(inputs) + self.batch_size - 1) // self.batch_size
-                    publish(StepTotalItems(step_id=obj.id, total=total_batches))
+                    publish(StepTotalItems(step_id=obj.id, total=len(inputs)))
 
                 bs = self.batch_size if self.batch_size > 0 else len(inputs)
                 batch_no = 0
@@ -177,7 +175,7 @@ class Executor:  # noqa: D101
 
                     outs, hist_out = obj.execute(batch_inp, batch_hist, writer, debug=debug)
 
-                    publish(BatchFinished(step_id=obj.id, batch_no=batch_no, count=1))
+                    publish(BatchFinished(step_id=obj.id, batch_no=batch_no, count=len(batch_inp)))
 
                     if outs:
                         new_inputs.extend(outs)
