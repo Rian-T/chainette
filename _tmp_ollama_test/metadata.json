@@ -1,0 +1,9 @@
+{
+  "execution_info": {
+    "chain_name": "extract-ollama",
+    "run_dir": "/Users/rtouchen/dev/chainette/_tmp_ollama_test"
+  },
+  "format": "jsonl",
+  "generated_by": "chainette v0.1.0",
+  "splits": []
+}

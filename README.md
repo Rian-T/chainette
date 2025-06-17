@@ -2,8 +2,8 @@
 
 **Chainette** is a tiny, type‑safe way to compose LLM pipelines in Python.
 
-*   ⚖️ < 350 LOC • MIT
-*   🔌 Works with any vLLM‑served model (Llama 3, Gemma, Mixtral…)
+*   ⚖️ ≈ 2 k LOC core package • MIT
+*   🔌 Works with any vLLM-served model (local **vllm_local**), **OpenAI API**, **vLLM-Serve API**, or **Ollama** – choose at runtime
 *   📜 Inputs & outputs are **Pydantic** models – no more brittle string parsing
 *   🎯 Automatic JSON **guided decoding**: the model must reply with the schema you declare
 *   🗂️ Filesystem first – every run leaves reproducible artefacts (`graph.json`, step files, flattened view)
@@ -11,9 +11,14 @@
 
 ## Install
 
-```bash
-pip install chainette           # or: poetry add chainette
-```
+# Core (HTTP back-ends only):
+pip install chainette
+
+# Add OpenAI + HTTP extras
+pip install chainette[openai]
+
+# Add Ollama HTTP extras
+pip install chainette[ollama]
 
 ## Quick Start
 
@@ -30,6 +35,30 @@ register_engine(
     dtype="bfloat16",
     gpu_memory_utilization=0.6,
     lazy=True,  # only start when needed
+)
+
+# --- NEW: OpenAI HTTP backend (optional) ---
+# Requires `pip install openai` and the env var `OPENAI_API_KEY`.
+register_engine(
+    name="gpt4o",
+    model="gpt-4.1-mini",  # or gpt-4o-2024-08-06
+    backend="openai",
+    endpoint="https://api.openai.com/v1",  # default
+)
+
+# 1c. vLLM Serve HTTP backend
+register_engine(
+    name="vllm_api",
+    model="gpt-4o-2024-08-06",
+    backend="vllm_api",
+    endpoint="http://localhost:8000/v1",  # vllm --serve
+)
+
+# 1d. Ollama HTTP backend
+register_engine(
+    name="qwen_local",
+    model="qwen2.5-instruct",
+    backend="ollama_api",  # Requires `ollama serve`
 )
 
 # 2. Define input/output schemas
@@ -97,6 +126,27 @@ chain = Chain(
 )
 ```
 
+### Branch Joins
+
+Merge outputs from parallel branches back into the main flow with `Branch.join(alias)`. The final output of each branch becomes accessible in later templates via the alias you provide:
+
+```python
+fr_branch = Branch(name="fr", steps=[translate_french]).join("fr")
+es_branch = Branch(name="es", steps=[translate_spanish]).join("es")
+
+agg = Step(
+    id="agg",
+    input_model=Translation,
+    output_model=Summary,
+    engine_name="llama3",
+    sampling=SamplingParams(temperature=0),
+    system_prompt="Summarise both translations.",
+    user_prompt="FR: {{fr.translated}}\nES: {{es.translated}}",
+)
+
+chain = Chain(name="Translate & Summarise", steps=[[fr_branch, es_branch], agg])
+```
+
 ### Python Functions
 
 Inject pure Python functions with `apply`:
@@ -111,6 +161,69 @@ chain = Chain(
     name="QA with filtering",
     steps=[qa_step, apply(filter_low_confidence)],
 )
+```
+
+### Architecture Overview (v2 – Elegance refactor)
+
+Internally Chainette is now modelled as a **directed acyclic graph**:
+
+```
+inputs → Step/Apply → … → Branch(es) → outputs
+```
+
+Key runtime components:
+
+• `Graph` / `GraphNode` – tiny DATACLASS helpers to link nodes.<br/>
+• `Executor` – walks the graph depth-first, handles batching & engine reuse.<br/>
+• `AsyncExecutor` – same but with an `async def run` using `anyio` threads.<br/>
+• `EnginePool` – LRU cache of live vLLM / Ollama engines.<br/>
+• `Result` – wrapper object to propagate either a `value` **or** an `error`.
+
+You still build chains exactly the same way; `Chain.run()` now proxies to the
+executor under the hood, so existing code doesn't change.
+
+## Runner Improvements (June 2025)
+
+Chainette now ships with a streaming execution **Runner**:
+
+* Chunked batching via `Executor.run_iter` → constant-memory even on millions of rows.
+* `StreamWriter` flushes each batch immediately and rolls files (`000.jsonl`, `001.jsonl`, …). Optional Parquet support (`pyarrow`).
+* Rich live logger—ASCII banner, DAG tree, progress bars—powered by an EventBus.
+* CLI additions:
+  * `--stream-writer` flag (recommended for big runs).
+  * `--quiet / --json-logs` for headless or scripted runs.
+  * `inspect-dag` command to visualise the graph without execution.
+
+Quick demo:
+```bash
+poetry run chainette run examples/runner/huge_batch_demo.py demo_chain inputs_huge.jsonl out --stream-writer
+```
+
+## DAG Visualisation & Live Progress  🖼️
+
+Chainette ships with a Rich-powered UI:
+
+```
+Execution DAG
+└── parallel × 2
+    ├── fr_branch
+    │   └── 📄 translate_fr
+    └── es_branch
+        └── 📄 translate_es
+qa_step  ███████▏ 70% •  7/10 • 0:03
+```
+
+Key features
+1. Icons for node types (📄 Apply / 🤖 Step / 🪢 Branch root, etc.).
+2. Collapse long parallel groups with "N more…".
+3. Flags:
+   * `--no-icons` → plain ASCII.
+   * `--max-branches 3` → limit displayed branches.
+4. Live progress bars per step with `completed/total` badge.
+
+Print tree only:
+```bash
+poetry run chainette inspect-dag examples/translate.py my_chain --no-icons
 ```
 
 ## CLI Usage
@@ -144,6 +257,11 @@ engines:
     enable_reasoning: false
     devices: [0]
     lazy: true
+  - name: gpt4o
+    backend: openai
+    model: gpt-4.1-mini
+    endpoint: https://api.openai.com/v1
+    # `OPENAI_API_KEY` must be set in your environment
 ```
 
 ## Output Structure
@@ -158,14 +276,55 @@ Each run creates:
 Check the `examples/` directory:
 - `product_struct_extract.py`: Extract product attributes with translations
 - `multi_doc_summary_eval.py`: Document summarization with quality scoring
+- `join/inc_dec_join.py`: Tiny pure-Python Join demo (no LLM needed)
+
+## Supported Back-ends
+
+| backend value   | Description                  | Transport |
+|-----------------|------------------------------|-----------|
+| `openai`        | OpenAI Chat completions      | HTTPS    |
+| `vllm_api`      | vLLM **OpenAI-compatible** server (`python -m vllm.entrypoints.openai.api_server`) | HTTP |
+| `ollama_api`    | Ollama REST (`ollama serve`) | HTTP |
+
+`enable_reasoning` is currently available only for `vllm_api` when the remote server supports reasoning flags.
 
 ## Requirements
 
-- Python 3.9+
-- vLLM for model serving
-- Pydantic v2
-- Hugging Face datasets
+Mandatory: Python ≥ 3.9, Pydantic v2, `datasets`.
+
+Optional back-ends:
+
+```bash
+# In-process vLLM (GPU):
+pip install vllm
+
+# HTTP OpenAI:
+pip install openai
+
+# HTTP Ollama
+brew install ollama  # macOS helper
+# or see https://ollama.ai
+```
 
 ## License
 
 MIT
+
+## Engine Broker (2025)
+
+A minimal ref-count abstraction ensuring engines spin up lazily and are flushed deterministically.
+
+```python
+from chainette.engine.broker import EngineBroker as EB
+
+with EB.acquire("gemma_ollama") as eng:
+    eng.generate(prompts, sampling)
+
+# At end of run Executor calls
+EB.flush(force=True)  # frees any idle engines
+```
+
+Key points
+1. Context-manager → zero manual release in nodes.
+2. Reference counting prevents premature kills while branches share an engine.
+3. Idle engines auto-evict after 180 s or via `force=True`.

@@ -10,8 +10,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from vllm import LLM
+_Any = Any  # simple alias for forward references without importing heavy libs
 
+# Public exports for `import *`
 __all__ = [
     "EngineConfig",
     "register_engine",
@@ -19,13 +20,11 @@ __all__ = [
     "load_engines_from_yaml",
 ]
 
-
+# Global in-memory store of engine configurations.
 _REGISTRY: Dict[str, "EngineConfig"] = {}
 
-
-def _is_vllm_model(model: str) -> bool:
-    """Very naive detection whether *model* should be loaded with vLLM."""
-    return True  # For now we assume everything is vLLM – keeps the code tiny.
+# `_is_vllm_model` used to decide whether to instantiate an in-process vLLM.
+# (Removed)
 
 
 @dataclass
@@ -41,11 +40,27 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
     enable_reasoning: bool = False
     reasoning_parser: Optional[str] = None
 
+    # Engine backend: "vllm_api", "openai", "ollama_api", "ollama" (legacy)
+    backend: str = "vllm_api"
+
+    # Process-lifecycle / serve flags (Phase D)
+    lazy: bool = True  # if False -> spawn at chain start & keep until end
+    port: Optional[int] = None  # preferred port when spawning a vllm serve
+    extra_serve_flags: list[str] = field(default_factory=list)
+    extra_env: Dict[str, str] = field(default_factory=dict)
+
     # Additional, engine-specific kwargs
     extra: Dict[str, Any] = field(default_factory=dict)
 
     # Internal cache for the instantiated engine object
-    _engine: Optional[LLM] = field(init=False, default=None, repr=False)
+    _engine: Optional[_Any] = field(init=False, default=None, repr=False)
+
+    # Handle to subprocess when Chainette spawns an external server
+    process: Optional[Any] = field(default=None, repr=False, compare=False)
+
+    # HTTP-specific fields
+    endpoint: Optional[str] = None
+    api_key: Optional[str] = None
 
     # -------------------------------------------------- #
     # Public helpers
@@ -55,10 +70,19 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
     def engine(self):
         """Return the instantiated engine (lazy-loaded once)."""
         if self._engine is None:
-            if _is_vllm_model(self.model):
-                self._engine = self._create_vllm_engine()
+            if self.backend == "ollama":
+                self._engine = self._create_ollama_engine()
+            elif self.backend == "vllm_api":
+                from chainette.engine.http_client import VLLMClient
+                self._engine = VLLMClient(self.endpoint, self.model)
+            elif self.backend == "openai":
+                from chainette.engine.http_client import OpenAIClient
+                self._engine = OpenAIClient(self.endpoint, self.api_key, self.model)
+            elif self.backend == "ollama_api":
+                from chainette.engine.http_client import OllamaHTTPClient
+                self._engine = OllamaHTTPClient(self.endpoint, self.model)
             else:
-                raise ValueError("Only vLLM engines are supported at the moment.")
+                raise ValueError(f"Unsupported backend '{self.backend}'.")
         return self._engine
 
     def release_engine(self):
@@ -81,28 +105,17 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
     # Private helpers
     # -------------------------------------------------- #
 
-    def _create_vllm_engine(self):
-        """Instantiate a vLLM LLM object from this config."""
-        kwargs: Dict[str, Any] = {
-            "model": self.model,
-        }
-        if self.dtype:
-            kwargs["dtype"] = self.dtype
-        if self.gpu_memory_utilization is not None:
-            kwargs["gpu_memory_utilization"] = self.gpu_memory_utilization
-        if self.max_model_len is not None:
-            kwargs["max_model_len"] = self.max_model_len
-        if self.tensor_parallel_size is not None:
-            kwargs["tensor_parallel_size"] = self.tensor_parallel_size
-        if self.enable_reasoning:
-            kwargs["enable_reasoning"] = True
-            if self.reasoning_parser:
-                kwargs["reasoning_parser"] = self.reasoning_parser
+    def _create_ollama_engine(self):
+        """Instantiate an Ollama engine wrapper matching vLLM interface."""
+        try:
+            from chainette.engine.ollama_client import OllamaLLM
+        except ModuleNotFoundError as e:
+            raise ModuleNotFoundError(
+                "Ollama backend requested but 'ollama' package is not installed.\n"
+                "Install with: pip install chainette[ollama] or poetry add --optional ollama"
+            ) from e
 
-        # Merge in extra (last so callers can override anything)
-        kwargs.update(self.extra)
-
-        return LLM(**kwargs)
+        return OllamaLLM(model=self.model)
 
     # -------------------------------------------------- #
 
@@ -129,7 +142,25 @@ def register_engine(name: str, **kwargs):  # noqa: D401 – simple factory
     cfg_kwargs["extra"] = extra
     cfg_kwargs["name"] = name
 
+    # Default backend fallback -> HTTP vLLM
+    if "backend" not in cfg_kwargs:
+        cfg_kwargs["backend"] = "vllm_api"
+
+    # Deprecation shim for legacy configs
+    if cfg_kwargs.get("backend") == "vllm_local":
+        raise ValueError("backend 'vllm_local' is no longer supported. Use 'vllm_api' instead.")
+
     cfg = EngineConfig(**cfg_kwargs)
+
+    # Warn if reasoning requested but backend lacks support
+    if cfg.enable_reasoning and cfg.backend != "vllm_api":
+        import warnings
+        warnings.warn(
+            f"enable_reasoning is not supported for backend '{cfg.backend}'. The flag will be ignored.",
+            UserWarning,
+        )
+        cfg.enable_reasoning = False
+
     _REGISTRY[name] = cfg
     return cfg
 

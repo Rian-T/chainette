@@ -12,17 +12,16 @@ from typing import List, Tuple, Dict, Any, Optional
 from pydantic import BaseModel
 
 from chainette.io.writer import RunWriter
+from .composite import CompositeNode
 from .node import Node
 from .step import Step
 
 __all__ = ["Branch"]
 
 
-class Branch(Node):  # noqa: D101
-    def __init__(self, name: str, steps: List[Node]):
-        self.id = name
-        self.name = name
-        self.steps = steps
+class Branch(CompositeNode):  # noqa: D101
+    def __init__(self, name: str, steps: List[CompositeNode | Node]):
+        super().__init__(id=name, name=name, steps=steps)
 
     # -------------------------------------------------- #
 
@@ -60,3 +59,9 @@ class Branch(Node):  # noqa: D101
         
         if debug:
             print(f"DEBUG: Branch '{self.name}' execution finished.")
+
+    # Fluent helper ---------------------------------------------------- #
+    def join(self, alias: str):  # noqa: D401
+        """Return a JoinBranch that will merge outputs under *alias*."""
+        from .join_branch import JoinBranch  # local import to avoid cycle
+        return JoinBranch(alias, name=self.name, steps=self.steps)

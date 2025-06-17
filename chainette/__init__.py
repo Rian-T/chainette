@@ -55,3 +55,10 @@ __all__ = [
     # Config classes
     "EngineConfig",
 ]
+
+# --------------------------------------------------------------------------- #
+# Silence noisy third-party INFO logs (e.g. vllm import banner) before they run
+# --------------------------------------------------------------------------- #
+import logging as _logging
+
+_logging.basicConfig(level=_logging.ERROR)

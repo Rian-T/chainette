@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Any, Type
 
 import typer
+import logging
 from rich.console import Console
 from rich.table import Table
 from pydantic import BaseModel
@@ -20,6 +21,10 @@ app = typer.Typer(
     help="CLI for Chainette: typed, lightweight LLM chaining.",
     add_completion=False,
 )
+
+# Silence noisy lib logs ASAP
+logging.disable(logging.CRITICAL)
+
 console = Console()
 
 
@@ -183,10 +188,17 @@ def inspect(
 def run(
     chain_file: Path = typer.Argument(..., help="Path to the Python file containing the chain definition.", exists=True, file_okay=True, dir_okay=False, readable=True),
     chain_name: str = typer.Argument(..., help="Name of the chain variable in the file."),
-    input_file: Path = typer.Argument(..., help="Path to the input JSONL file (each line is a Pydantic model for the first step).", exists=True, file_okay=True, dir_okay=False, readable=True),
+    input_file: Path = typer.Argument(None, help="Path to the input JSONL file (each line is a Pydantic model for the first step).", exists=False),
+    hf_dataset: str = typer.Option(None, "--hf-dataset", help="HuggingFace dataset path (repo_id or local folder)"),
+    hf_split: str = typer.Option("train", "--hf-split", help="Split name or slicing notation (e.g. train[:1000])"),
     output_dir: Path = typer.Argument(..., help="Directory to save the output datasets.", file_okay=False, dir_okay=True, writable=True, resolve_path=True),
     generate_flattened: bool = typer.Option(True, "--flattened/--no-flattened", help="Generate a single flattened output file."),
-    max_lines_per_file: int = typer.Option(1000, help="Maximum lines per output data file.")
+    max_lines_per_file: int = typer.Option(1000, help="Maximum lines per output data file."),
+    stream_writer: bool = typer.Option(False, "--stream-writer/--no-stream-writer", help="Use the new incremental StreamWriter."),
+    no_icons: bool = typer.Option(False, "--no-icons", help="Disable emoji/icons in DAG tree."),
+    max_branches: int = typer.Option(None, "--max-branches", help="Limit number of branches shown under parallel wrapper."),
+    quiet: bool = typer.Option(False, "--quiet", help="Disable live progress/output."),
+    json_logs: bool = typer.Option(False, "--json-logs", help="Emit JSON event logs instead of Rich UI."),
 ):
     """Run a chain with inputs from a JSONL file and save results."""
     console.print(f"[cyan]Running chain '{chain_name}' from {chain_file}...[/]")
@@ -205,35 +217,59 @@ def run(
     if isinstance(first_node, Step):
         input_model_type = first_node.input_model
     elif isinstance(first_node, ApplyNode):
-        # Cannot easily infer input type for ApplyNode, user must ensure input file matches
-        console.print("[yellow]Warning: First step is an ApplyNode. Cannot determine expected input model type automatically. Ensure input file format is correct.[/]")
+        if getattr(first_node, "input_model", None):
+            input_model_type = first_node.input_model  # type: ignore[assignment]
+            console.print("[yellow]First step is ApplyNode – using declared input_model for parsing.[/]")
+        else:
+            console.print("[yellow]Warning: First step is an ApplyNode without input_model. Unable to infer type.[/]")
     elif isinstance(first_node, Branch):
          if first_node.steps and isinstance(first_node.steps[0], Step):
              input_model_type = first_node.steps[0].input_model
 
-    if not input_model_type:
-        console.print("[bold red]Error: Could not determine the input model type for the chain's first step. Ensure the first step is a Step or a Branch starting with a Step.[/]")
-        raise typer.Exit(code=1)
+    raw_mode = input_model_type is None
+    if raw_mode:
+        console.print("[yellow]Input model could not be inferred – loading inputs as raw JSON dicts.[/]")
 
     # Load inputs
     inputs_data: List[BaseModel] = []
-    try:
-        with open(input_file, "r", encoding="utf-8") as f:
-            for line_num, line in enumerate(f, 1):
-                if line.strip():
+    if hf_dataset:
+        try:
+            from datasets import load_dataset  # lazy import
+            ds = load_dataset(hf_dataset, split=hf_split)
+            console.print(f"Loaded HF dataset '{hf_dataset}' split '{hf_split}' (rows={len(ds)}).")
+            for row in ds:
+                data_obj = row
+                if not raw_mode:
                     try:
+                        data_obj = input_model_type.model_validate(row)
+                    except Exception:  # fallback keep raw
+                        pass
+                inputs_data.append(data_obj)
+        except Exception as e:
+            console.print(f"[bold red]Failed to load HuggingFace dataset: {e}[/]")
+            raise typer.Exit(code=1)
+    else:
+        # JSONL path
+        if input_file is None or not input_file.exists():
+            console.print("[bold red]Input file not found.[/]")
+            raise typer.Exit(code=1)
+        try:
+            with open(input_file, "r", encoding="utf-8") as f:
+                for line_num, line in enumerate(f, 1):
+                    if line.strip():
                         data = json.loads(line)
-                        inputs_data.append(input_model_type.model_validate(data))
-                    except json.JSONDecodeError as e:
-                        console.print(f"[bold red]Error decoding JSON on line {line_num} in {input_file}: {e}[/]")
-                        raise typer.Exit(code=1)
-                    except Exception as e: # Includes Pydantic validation errors
-                        console.print(f"[bold red]Error parsing/validating line {line_num} in {input_file} for model {input_model_type.__name__}: {e}[/]")
-                        raise typer.Exit(code=1)
-        console.print(f"Loaded {len(inputs_data)} input records from {input_file}.")
-    except Exception as e:
-        console.print(f"[bold red]Error reading input file {input_file}: {e}[/]")
-        raise typer.Exit(code=1)
+                        if raw_mode:
+                            inputs_data.append(data)
+                        else:
+                            try:
+                                inputs_data.append(input_model_type.model_validate(data))
+                            except Exception as e:  # noqa: BLE001
+                                console.print(f"[bold red]Error validating line {line_num}: {e}[/]")
+                                raise typer.Exit(code=1)
+            console.print(f"Loaded {len(inputs_data)} input records from {input_file}.")
+        except Exception as e:
+            console.print(f"[bold red]Error reading input file {input_file}: {e}[/]")
+            raise typer.Exit(code=1)
 
     if not inputs_data:
         console.print("[yellow]Warning: Input file is empty or contains no valid data. Nothing to run.[/]")
@@ -242,14 +278,60 @@ def run(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        console.print(f"Executing chain. Output will be saved to: {output_dir}")
+        if not quiet:
+            from chainette.utils.banner import ChainetteBanner  # noqa: WPS433
+            ChainetteBanner(console=console).display()
+
+        console.print(
+            f"[bold]Chain:[/] {chain_obj.name} • [bold]Inputs:[/] {len(inputs_data)} • "
+            f"[bold]Output Dir:[/] {output_dir}",
+        )
+        console.print("")  # spacing
+
+        # Prepare writer (legacy or streaming)
+        if stream_writer:
+            from chainette.io.stream_writer import StreamWriter  # noqa: WPS433
+
+            writer = StreamWriter(output_dir, max_lines_per_file=max_lines_per_file, fmt="jsonl")
+        else:
+            from chainette.io.writer import RunWriter
+
+            writer = RunWriter(output_dir, max_lines_per_file=max_lines_per_file, fmt="jsonl")
+
+        if not quiet and not json_logs:
+            from chainette.utils.logging import show_dag_tree  # noqa: WPS433
+            from chainette.utils.dag import RenderOptions
+
+            opts = RenderOptions(icons_on=(not no_icons), max_branches=max_branches)
+            show_dag_tree(chain_obj, opts=opts)
+
+        if json_logs:
+            # Simple JSON print of events
+            from chainette.utils.events import subscribe, BatchStarted, BatchFinished
+            import json as _json
+
+            @subscribe(BatchStarted)
+            def _log_bs(e):
+                print(_json.dumps({"event": "batch_started", **e.__dict__}))
+
+            @subscribe(BatchFinished)
+            def _log_bf(e):
+                print(_json.dumps({"event": "batch_finished", **e.__dict__}))
+
         chain_obj.run(
             inputs=inputs_data,
+            writer=writer,
             output_dir=output_dir,
-            fmt="jsonl", # Currently hardcoded, could be an option
+            fmt="jsonl",  # Currently hardcoded, could be an option
             generate_flattened_output=generate_flattened,
-            max_lines_per_file=max_lines_per_file
+            max_lines_per_file=max_lines_per_file,
         )
+
+        if not quiet and not json_logs:
+            from chainette.utils.logging import stop as _stop_progress
+
+            _stop_progress()
+
         console.print("[bold green]Chain execution finished successfully![/]")
         console.print(f"Results written to {output_dir}")
     except Exception as e:
@@ -257,6 +339,149 @@ def run(
         import traceback
         console.print(f"[dim]{traceback.format_exc()}[/dim]")
         raise typer.Exit(code=1)
+
+# --------------------------------------------------------------------------- #
+# YAML runner
+# --------------------------------------------------------------------------- #
+
+from chainette.yaml_loader import load_chain as _load_chain_yaml
+
+
+@app.command("run-yaml")
+def run_yaml(
+    yaml_file: Path = typer.Argument(..., help="YAML chain file", exists=True, file_okay=True, dir_okay=False),
+    output_dir: Path = typer.Argument(..., help="Output directory", dir_okay=True, file_okay=False, writable=True, resolve_path=True),
+    generate_flattened: bool = typer.Option(True, "--flattened/--no-flattened"),
+    max_lines_per_file: int = typer.Option(1000),
+    symbols_module: str = typer.Option("examples.ollama_gemma_features", help="Python module with step/branch symbols"),
+    hf_dataset: str = typer.Option(None, "--hf-dataset", help="HuggingFace dataset path"),
+    hf_split: str = typer.Option("train", "--hf-split"),
+):
+    """Run a chain defined in YAML."""
+    console.print(f"[cyan]Running YAML chain from {yaml_file}…[/]")
+
+    syms_mod = importlib.import_module(symbols_module)
+    chain_obj = _load_chain_yaml(yaml_file, symbols=syms_mod.__dict__)
+
+    # Collect first step's input model for hint
+    first = chain_obj.steps[0]
+    console.print(f"Chain '[bold]{chain_obj.name}[/]' loaded with {len(chain_obj.steps)} top-level steps.")
+
+    # Load inputs (HF dataset or default inputs2.jsonl)
+    if hf_dataset:
+        from datasets import load_dataset
+        ds = load_dataset(hf_dataset, split=hf_split)
+        console.print(f"Loaded HF dataset '{hf_dataset}' split '{hf_split}' (rows={len(ds)}).")
+        inputs_raw = list(ds)
+    else:
+        input_path = Path("inputs2.jsonl")
+        if not input_path.exists():
+            console.print("[red]inputs2.jsonl not found – provide --hf-dataset or create file.[/]")
+            raise typer.Exit(1)
+        import json
+        inputs_raw = [json.loads(l) for l in input_path.read_text().splitlines() if l]
+
+    model_cls = first.input_model if isinstance(first, Node) else None  # type: ignore[attr-defined]
+    if not model_cls:
+        console.print("[red]Cannot infer input model.[/]")
+        raise typer.Exit(1)
+
+    pyd_inputs = []
+    for obj in inputs_raw:
+        try:
+            pyd_inputs.append(model_cls.model_validate(obj))
+        except Exception:
+            pyd_inputs.append(obj)
+
+    chain_obj.run(pyd_inputs, output_dir=output_dir, generate_flattened_output=generate_flattened, max_lines_per_file=max_lines_per_file)
+
+    console.print("[green]YAML chain finished.[/]")
+
+# --------------------------------------------------------------------------- #
+# New DAG-only inspector
+# --------------------------------------------------------------------------- #
+
+
+@app.command("inspect-dag")
+def inspect_dag(
+    chain_file: Path = typer.Argument(..., help="Python file containing chain."),
+    chain_name: str = typer.Argument(..., help="Chain variable name."),
+):
+    """Print a Rich DAG tree without executing the chain."""
+    chain_obj = _load_chain_from_file(chain_file, chain_name)
+
+    from chainette.utils.banner import ChainetteBanner
+    ChainetteBanner(console=console).display()
+
+    console.print(f"[bold]Chain:[/] {chain_obj.name} • [bold]DAG ONLY[/]")
+    console.print("")
+
+    from chainette.utils.logging import show_dag_tree  # noqa: WPS433
+    from chainette.utils.dag import RenderOptions
+
+    opts = RenderOptions(icons_on=True, max_branches=max_branches)
+    show_dag_tree(chain_obj, opts=opts)
+    console.print(f"[green]DAG inspection complete – {len(chain_obj.steps)} top-level nodes shown.[/]")
+
+# --------------------------------------------------------------------------- #
+# Warm-up non-lazy engines for a Chain                                        #
+# --------------------------------------------------------------------------- #
+
+
+@app.command("warmup")
+def warmup(
+    chain_file: Path = typer.Argument(..., help="Python or YAML file defining the chain."),
+    chain_name: str = typer.Option(None, "--chain-name", help="Name of the Chain variable when using a .py file."),
+):
+    """Instantiate all *non-lazy* engines used by the specified chain.
+
+    • For **.py** files you must pass `--chain-name` pointing to the Chain object.
+    • For **.yml/.yaml** definitions we call `yaml_loader.load_chain`.
+
+    The command simply triggers the lazy `cfg.engine` property so HTTP clients
+    get instantiated and (in future) any required vLLM server processes are
+    spawned.  Currently it only instantiates clients – process management will
+    be added once `EngineProcessManager` lands.
+    """
+
+    console.print("[cyan]Warming up engines…[/]")
+
+    # Resolve chain object
+    if chain_file.suffix in {".yml", ".yaml"}:
+        from chainette.yaml_loader import load_chain as _load_chain_yaml  # noqa: WPS433
+
+        chain_obj = _load_chain_yaml(chain_file)
+    else:
+        if chain_name is None:
+            console.print("[red]--chain-name is required for Python files.[/]")
+            raise typer.Exit(1)
+        chain_obj = _load_chain_from_file(chain_file, chain_name)
+
+    # Collect unique engine configs
+    from chainette.core.step import Step  # lazy import
+
+    engine_names: set[str] = set()
+    for node in chain_obj.steps:
+        nodes = node if not isinstance(node, list) else node  # flatten top-level
+        for sub in (nodes if isinstance(nodes, list) else [nodes]):
+            if isinstance(sub, Step):
+                engine_names.add(sub.engine_name)
+
+    warmed = 0
+    from chainette.engine.registry import get_engine_config
+
+    for name in engine_names:
+        cfg = get_engine_config(name)
+        if cfg.lazy:
+            continue  # skip lazy engines
+        _ = cfg.engine  # instantiate
+        warmed += 1
+        console.print(f"[green]✓[/] {name} ({cfg.backend}) ready")
+
+    if warmed == 0:
+        console.print("[yellow]No non-lazy engines found – nothing to warm up.[/]")
+    else:
+        console.print(f"[bold green]Warm-up complete – {warmed} engine(s) ready.[/]")
 
 if __name__ == "__main__":
     app() 

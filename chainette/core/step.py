@@ -7,19 +7,42 @@ objects into a list of *output_model* objects.
 """
 
 from typing import List, Tuple, Type, Any, Optional, Dict
-import json
 
 from pydantic import BaseModel
 from transformers import AutoTokenizer
 
-from chainette.utils.templates import render
 from chainette.engine.registry import get_engine_config
 from chainette.core.node import Node
 from chainette.io.writer import RunWriter
 from chainette.utils.json_schema import generate_json_output_prompt
 
-from vllm import SamplingParams
-from vllm.sampling_params import GuidedDecodingParams
+try:
+    # Prefer the real vLLM classes when available.
+    from vllm import SamplingParams  # type: ignore
+    from vllm.sampling_params import GuidedDecodingParams  # type: ignore
+except (ModuleNotFoundError, ImportError):  # pragma: no cover – fallback when vllm extra not installed
+    from dataclasses import dataclass, field
+    from typing import List as _List, Optional as _Optional, Dict as _Dict, Any as _Any
+
+    @dataclass
+    class GuidedDecodingParams:  # noqa: D401
+        """Minimal stub providing the *json* attribute only."""
+
+        json: _Dict[str, _Any] | None = None
+
+    @dataclass
+    class SamplingParams:  # noqa: D401
+        """Lightweight replacement exposing the attrs Chainette relies on."""
+
+        temperature: float | None = None
+        top_p: _Optional[float] = None
+        max_tokens: _Optional[int] = None
+        stop: _List[str] = field(default_factory=list)
+        guided_decoding: 'GuidedDecodingParams | None' = None
+
+# Additional imports that depend on the presence of SamplingParams
+from chainette.utils.prompt import build_prompt
+from chainette.utils.parsing import parse_llm_json
 
 __all__ = [
     "Step",
@@ -34,7 +57,7 @@ class Step(Node):
         *,
         id: str,
         name: str,
-        input_model: Type[BaseModel],
+        input_model: Type[BaseModel] | None = None,
         output_model: Type[BaseModel],
         engine_name: str,
         sampling: SamplingParams,
@@ -46,14 +69,13 @@ class Step(Node):
     ) -> None:
         self.id = id
         self.name = name
-        self.input_model = input_model
+        self.input_model: Type[BaseModel] | None = input_model
         self.output_model = output_model
         self.engine_name = engine_name
         self.sampling = sampling
 
         self.tokenizer = None
         self.max_model_len = None
-        self.engine = None
 
         _original_system_prompt = system_prompt.strip()
 
@@ -74,61 +96,21 @@ class Step(Node):
         self.yield_output = yield_output
 
         json_schema = self.output_model.model_json_schema()
-        guided_params = GuidedDecodingParams(json=json_schema)
-        self.sampling.guided_decoding = guided_params
-
-    def _build_prompt(self, item_history: Dict[str, Any]) -> str:
-        rendering_context = {}
-        for key, value in item_history.items():
-            if isinstance(value, BaseModel): # Check if Pydantic model
-                model_dict = value.model_dump()
-                for field_name, field_val in model_dict.items():
-                    rendering_context[f"{key}.{field_name}"] = field_val
-                rendering_context[key] = value # Keep original model object as well
-            else:
-                rendering_context[key] = value # For non-model items like 'chain_input' or 'step_id.reasoning_content'
-
-        messages = []
-
-        rendered_system_prompt = render(self.system_prompt, rendering_context) if self.system_prompt else ""
-        if rendered_system_prompt:
-            messages.append({"role": "system", "content": rendered_system_prompt})
-
-        rendered_user_prompt = render(self.user_prompt, rendering_context)
-        messages.append({"role": "user", "content": rendered_user_prompt})
-
-        if not messages:
-            return ""
-            
-        # Ensure tokenizer is initialized
-        if self.tokenizer is None:
-            cfg = get_engine_config(self.engine_name)
-            self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
-
-        return self.tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=True,
-        )
-
-    def _parse_output(self, llm_output: Any) -> Tuple[BaseModel, Optional[str]]:
-        first_completion = llm_output.outputs[0]
-        text = first_completion.text.strip()
-        print(f"DEBUG: Raw LLM-output text: {text}")
-        reasoning_content: Optional[str] = None
-        if hasattr(first_completion, "reasoning"):
-            reasoning_content = str(first_completion.reasoning)
-        elif hasattr(first_completion, "reasoning_content"):
-            reasoning_content = str(first_completion.reasoning_content)
-
+        # Guided decoding not supported by the OpenAI backend (it uses a different
+        # structured-output mechanism). Attach guided params only for back-ends
+        # that explicitly advertise support (vllm, ollama, etc.).
         try:
-            data = json.loads(text)
-            obj = self.output_model.model_validate(data)
-            return obj, reasoning_content
-        except json.JSONDecodeError as e:
-            raise ValueError(f"Invalid JSON output from '{self.engine_name}' for step '{self.id}': {text}. Error: {e}")
-        except Exception as exc:
-            raise ValueError(f"Failed to validate output for step '{self.id}': {exc}\nModel: {self.engine_name}\nOutput: {text}")
+            cfg = get_engine_config(self.engine_name)
+        except KeyError:
+            cfg = None  # engine not registered yet; assume supports guided params
+
+        if cfg is None or getattr(cfg, "backend", "vllm") not in ("openai",):
+            guided_params = GuidedDecodingParams(json=json_schema)
+            self.sampling.guided_decoding = guided_params
+        else:
+            # Ensure we don't accidentally send guided decoding hints.
+            if hasattr(self.sampling, "guided_decoding"):
+                self.sampling.guided_decoding = None
 
     def execute(
         self,
@@ -136,74 +118,54 @@ class Step(Node):
         item_histories: List[Dict[str, Any]],
         writer: RunWriter | None = None,
         debug: bool = False,
-        batch_size: int = 0, # Default to 0 means no batching or handle full list
+        batch_size: int = 0,  # Kept for API-compat but now ignored – batching handled by Executor
     ) -> Tuple[List[BaseModel], List[Dict[str, Any]]]:
         if len(inputs) != len(item_histories):
             raise ValueError("Mismatch between number of inputs and item_histories in Step.execute")
 
+        # Lazily fetch tokenizer once
         cfg = get_engine_config(self.engine_name)
-        if self.engine is None:
-            self.engine = cfg.engine
-            # Re-initialize tokenizer whenever engine is initialized
+        backend = getattr(cfg, "backend", "vllm")
+        if backend not in ("ollama", "ollama_api", "openai", "vllm_api") and self.tokenizer is None:
             self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
 
-        all_parsed_outputs: List[BaseModel] = []
-        all_new_item_histories: List[Dict[str, Any]] = []
-
-        # Determine actual batch_size: if 0 or less, or larger than inputs, process all at once
-        effective_batch_size = batch_size if batch_size > 0 and batch_size < len(inputs) else len(inputs)
-        if effective_batch_size == 0 and len(inputs) > 0: # handle case where inputs might be empty
-             effective_batch_size = len(inputs)
-        elif len(inputs) == 0:
+        if not inputs:
             return [], []
 
+        prompts = [build_prompt(self, hist) for hist in item_histories]
 
-        for i in range(0, len(inputs), effective_batch_size):
-            batch_inputs = inputs[i:i + effective_batch_size]
-            batch_item_histories = item_histories[i:i + effective_batch_size]
+        if debug and prompts:
+            print(f"STEP {self.id}: generating {len(prompts)} prompt(s). Sample prompt:\n{prompts[0][:500]}…")
 
-            prompts = [self._build_prompt(hist) for hist in batch_item_histories]
+        from chainette.engine.broker import EngineBroker
 
-            if debug:
-                print(f"DEBUG: Step '{self.id}' processing batch {i // effective_batch_size + 1} with {len(batch_inputs)} items.")
-                # Optionally print one prompt from the batch for brevity
-                if prompts:
-                    print(f"DEBUG: Sample prompt from batch: {prompts[0][:500]}...") # Print first 500 chars
+        with EngineBroker.acquire(self.engine_name) as eng:
+            raw_outputs = eng.generate(prompts=prompts, sampling_params=self.sampling)
 
-            outputs_raw_batch = self.engine.generate(prompts=prompts, sampling_params=self.sampling)
+        parsed_outputs: List[BaseModel] = []
+        new_histories: List[Dict[str, Any]] = []
 
-            batch_parsed_outputs: List[BaseModel] = []
-            batch_new_item_histories: List[Dict[str, Any]] = []
+        for hist, raw in zip(item_histories, raw_outputs):
+            try:
+                parsed, reasoning = parse_llm_json(
+                    self.output_model,
+                    raw,
+                    engine_name=self.engine_name,
+                    step_id=self.id,
+                )
+                parsed_outputs.append(parsed)
 
-            for j, raw_out in enumerate(outputs_raw_batch):
-                original_item_history = batch_item_histories[j]
-                try:
-                    parsed_output, reasoning = self._parse_output(raw_out)
-                    batch_parsed_outputs.append(parsed_output)
-                    
-                    # Update history for this item
-                    updated_history = original_item_history.copy()
-                    if self.yield_output:
-                        updated_history[self.id] = parsed_output
-                    if reasoning:
-                        updated_history[f"{self.id}_reasoning"] = reasoning
-                    batch_new_item_histories.append(updated_history)
+                h = hist.copy()
+                if self.yield_output:
+                    h[self.id] = parsed
+                if reasoning:
+                    h[f"{self.id}_reasoning"] = reasoning
+                new_histories.append(h)
+            except ValueError as e:
+                print(f"Warning: skipping item in step '{self.id}' due to parse error: {e}")
+                new_histories.append(hist.copy())
 
-                except ValueError as e:
-                    print(f"Warning: Skipping item due to parsing/validation error in step '{self.id}': {e}")
-                    # Append original history if output is skipped, or decide on error handling
-                    batch_new_item_histories.append(original_item_history.copy()) 
-                    # Optionally, append a placeholder or error object to batch_parsed_outputs
-                    # For now, we just skip adding to batch_parsed_outputs for this item
+        if writer is not None and self.yield_output and parsed_outputs:
+            writer.write_step(self.id, parsed_outputs)
 
-            all_parsed_outputs.extend(batch_parsed_outputs)
-            all_new_item_histories.extend(batch_new_item_histories)
-
-            if writer is not None and self.yield_output and batch_parsed_outputs:
-                # Write only the successfully parsed outputs of the current batch
-                writer.write_step(self.id, batch_parsed_outputs)
-                if debug:
-                    print(f"DEBUG: Step '{self.id}' wrote {len(batch_parsed_outputs)} outputs for batch {i // effective_batch_size + 1} to writer.")
-        
-        # The writer.finalize() will be called at the end of the Chain.run()
-        return all_parsed_outputs, all_new_item_histories
+        return parsed_outputs, new_histories

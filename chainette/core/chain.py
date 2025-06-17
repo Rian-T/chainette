@@ -3,17 +3,17 @@ from __future__ import annotations
 """Chain orchestration for Chainette."""
 
 from pathlib import Path
-from typing import List, Union, Optional, Dict, Any
-import gc
-import json
-import torch
+from typing import List, Union, Dict, Any
 
 from pydantic import BaseModel
 
-from chainette.core.branch import Node, Branch
-from chainette.core.step import Step
+from chainette.core.node import Node
+from chainette.core.branch import Branch
 from chainette.io.writer import RunWriter
-from chainette.engine.registry import EngineConfig, get_engine_config
+
+# New executor-based runtime
+from .graph import Graph, GraphNode
+from .executor import Executor
 
 __all__ = ["Chain"]
 
@@ -38,102 +38,77 @@ class Chain:
         self,
         inputs: List[BaseModel],
         *,
-        output_dir: str | Path,
+        writer: RunWriter | Any | None = None,  # StreamWriter or RunWriter
+        output_dir: str | Path | None = None,
         fmt: str = "jsonl",
         generate_flattened_output: bool = True,
         max_lines_per_file: int = 1000,
         debug: bool = False,
+        show_ui: bool = True,
     ):
-        """Execute the chain and write results to *output_dir*."""
-        writer = RunWriter(Path(output_dir), max_lines_per_file=max_lines_per_file, fmt=fmt)
-        writer.set_chain_name(self.name)
+        """Execute the chain and write results.
 
-        all_item_histories: List[Dict[str, Any]] = [{ "chain_input": inp } for inp in inputs]
-        current_processing_objects: List[BaseModel] = list(inputs)
-        
-        active_step_engine_config: EngineConfig | None = None
-        previous_step_node: Step | None = None 
+        A custom *writer* (e.g. StreamWriter) can be provided.  If absent, a
+        legacy `RunWriter` is created using *output_dir*.
+        """
 
-        if debug: print(f"Starting chain '{self.name}' with {len(inputs)} items.")
+        if writer is None:
+            if output_dir is None:
+                raise ValueError("output_dir must be provided when writer is None")
 
-        for node_idx, current_node_or_branch_list_item in enumerate(self.steps):
-            if debug: print(f"Processing item #{node_idx} in chain.steps (type: {type(current_node_or_branch_list_item).__name__})")
+            writer = RunWriter(Path(output_dir), max_lines_per_file=max_lines_per_file, fmt=fmt)
 
-            upcoming_step_engine_name: str | None = None
-            is_current_item_a_step = isinstance(current_node_or_branch_list_item, Step)
-            is_current_item_a_branch = isinstance(current_node_or_branch_list_item, Branch)
-            is_current_item_a_list_of_branches = isinstance(current_node_or_branch_list_item, list)
+        # In both cases set chain name if attribute exists
+        if hasattr(writer, "set_chain_name"):
+            writer.set_chain_name(self.name)
 
-            if is_current_item_a_step:
-                upcoming_step_engine_name = current_node_or_branch_list_item.engine_name
+        # ---- Build Graph from linear steps list ---------------------------------
+        graph_nodes: List[GraphNode] = []
+        prev_gn: GraphNode | None = None
 
-            if active_step_engine_config:
-                should_release = False
-                if is_current_item_a_list_of_branches or is_current_item_a_branch:
-                    should_release = True
-                    if debug: print(f"Transitioning to a Branch or list of Branches, will release active engine '{active_step_engine_config.name}'.")
-                elif is_current_item_a_step and upcoming_step_engine_name != active_step_engine_config.name:
-                    should_release = True
-                    if debug: print(f"Upcoming step uses different engine ('{upcoming_step_engine_name}' vs '{active_step_engine_config.name}'), will release active engine.")
-                
-                if should_release:
-                    if debug: print(f"Releasing engine: {active_step_engine_config.name} (used by step: {previous_step_node.id if previous_step_node else 'N/A'})")
-                    active_step_engine_config.release_engine()
-                    if previous_step_node:
-                        previous_step_node.engine = None
-                        previous_step_node.tokenizer = None
-                    active_step_engine_config = None
-                    previous_step_node = None
-                    gc.collect()
-                    if torch.cuda.is_available():
-                        torch.cuda.empty_cache()
-                    if debug: print("Engine released and garbage collected.")
-            
-            if is_current_item_a_list_of_branches:
-                branches: List[Branch] = current_node_or_branch_list_item # It's a list of Branches
-                if debug: print(f"Executing {len(branches)} branches from a list.")
-                for br_idx, br in enumerate(branches):
-                    if debug: print(f"Executing branch #{br_idx} ('{br.name}') from list.")
-                    # Branches operate on copies of histories and current objects but don't modify them for the main chain flow directly
-                    branch_item_histories = [hist.copy() for hist in all_item_histories]
-                    br.execute(list(current_processing_objects), branch_item_histories, writer, debug=debug)
-                # After a list of branches, the Chain's active engine concept is reset.
-                active_step_engine_config = None
-                previous_step_node = None
-                if debug: print("Finished executing list of branches. Chain's active engine trackers reset.")
-            
-            elif is_current_item_a_branch:
-                branch_node: Branch = current_node_or_branch_list_item
-                if debug: print(f"Executing single Branch node: {branch_node.id} ('{branch_node.name}')")
-                branch_item_histories = [hist.copy() for hist in all_item_histories]
-                branch_node.execute(list(current_processing_objects), branch_item_histories, writer, debug=debug)
-                active_step_engine_config = None
-                previous_step_node = None
-                if debug: print(f"Node {branch_node.id} (Branch) finished. Chain's active engine trackers reset.")
-            
-            else: # Must be a Step or Apply node
-                node: Node = current_node_or_branch_list_item 
-                if debug: print(f"Executing single node: {node.id} (type: {type(node).__name__})")
-                
-                # Apply and Step nodes return updated objects and histories
-                current_processing_objects, all_item_histories = node.execute(
-                    current_processing_objects, all_item_histories, writer, debug=debug
-                )
+        for item in self.steps:
+            if isinstance(item, list):
+                # list of branches – connect previous node to each branch root
+                for br in item:
+                    gn = GraphNode(id=br.id, ref=br)
+                    if prev_gn is not None:
+                        prev_gn.connect(gn)
+                    graph_nodes.append(gn)
+                # branches don't become new prev_gn (main flow continues)
+            else:
+                gn = GraphNode(id=item.id, ref=item)
+                if prev_gn is not None:
+                    prev_gn.connect(gn)
+                else:
+                    graph_nodes.append(gn)  # root node
+                prev_gn = gn
 
-                if isinstance(node, Step):
-                    active_step_engine_config = get_engine_config(node.engine_name)
-                    previous_step_node = node
-                    if debug: print(f"Node {node.id} (Step) finished. Active engine is now '{active_step_engine_config.name}'.")
-                # If node is Apply, active_step_engine_config and previous_step_node remain as they were from the preceding Step.
-        
-        if active_step_engine_config:
-            if debug: print(f"End of chain. Releasing final active engine: {active_step_engine_config.name} (used by step: {previous_step_node.id if previous_step_node else 'N/A'})")
-            active_step_engine_config.release_engine()
-            if previous_step_node:
-                previous_step_node.engine = None
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-            if debug: print("Final engine released and garbage collected.")
-            
-        return writer.finalize(generate_flattened_output=generate_flattened_output)
+        if not graph_nodes:
+            raise ValueError("Chain has no executable nodes.")
+
+        graph = Graph(roots=graph_nodes[:1])  # first root; downstream links set above
+
+        if show_ui:
+            try:
+                from chainette.utils.banner import ChainetteBanner
+                from chainette.utils.logging import show_dag_tree
+
+                ChainetteBanner().display()  # type: ignore[call-arg]
+                show_dag_tree(self)
+            except Exception:  # noqa: BLE001
+                # UI is optional – ignore failures (e.g., non-TTY env)
+                pass
+
+        executor = Executor(graph, batch_size=self.batch_size)
+
+        # ------------------------------------------------------------------ #
+        histories = executor.run(inputs, writer, debug=debug)
+
+        # Finalise / close writer
+        if isinstance(writer, RunWriter):
+            return writer.finalize(generate_flattened_output=generate_flattened_output)
+        else:
+            # StreamWriter just needs to be closed
+            if hasattr(writer, "close"):
+                writer.close()
+            return None
