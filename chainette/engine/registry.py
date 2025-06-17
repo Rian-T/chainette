@@ -55,6 +55,9 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
     # Internal cache for the instantiated engine object
     _engine: Optional[_Any] = field(init=False, default=None, repr=False)
 
+    # Handle to subprocess when Chainette spawns an external server
+    process: Optional[Any] = field(default=None, repr=False, compare=False)
+
     # HTTP-specific fields
     endpoint: Optional[str] = None
     api_key: Optional[str] = None
