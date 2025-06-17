@@ -8,7 +8,7 @@ build_rich_tree(chain) returns a Rich *Tree* ready for printing.
 from typing import Iterator, List, Tuple, Any
 
 from chainette import Chain  # public import exposes core types via __all__
-from chainette.core.branch import Branch, JoinBranch
+from chainette.core.branch import Branch
 from chainette.core.node import Node
 
 __all__ = [

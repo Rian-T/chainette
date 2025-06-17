@@ -71,12 +71,15 @@ def show_dag_tree(obj):  # noqa: D401
     backward-compat.
     """
     try:
-        from chainette import Chain  # public import – avoids heavy core deps
         from chainette.utils.dag import build_rich_tree  # local helper
 
-        if isinstance(obj, Chain):
-            console.print(build_rich_tree(obj))
-            return
+        # Detect Chain by duck-typing to avoid import alias issues
+        if hasattr(obj, "steps"):
+            try:
+                console.print(build_rich_tree(obj))
+                return
+            except Exception:
+                pass
     except Exception:  # pragma: no cover – fallback safety
         pass
 
