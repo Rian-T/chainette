@@ -1,6 +1,7 @@
 import os
 import json
 import pytest
+from pydantic import BaseModel
 
 pytestmark = pytest.mark.integration
 
@@ -22,16 +23,24 @@ def test_openai_client_live():
         model="gpt-4.1-mini",
     )
 
+    # Prompt using system+user roles for realism
     prompt = (
-        "Return a JSON object with keys 'name', 'date', 'participants' describing the following event: "
-        "Alice and Bob are going to a science fair on Friday."
+        "Extract the event information from the sentence and output JSON with keys 'name', 'date', 'participants'. "
+        "Sentence: Alice and Bob are going to a science fair on Friday."
     )
 
     outputs = client.generate(prompts=[prompt])
     assert outputs, "No output returned from OpenAI"
 
     text = outputs[0].outputs[0].text.strip()
-    data = json.loads(text)  # should be valid JSON
 
-    # Basic sanity of keys
-    assert set(data.keys()) >= {"name", "date", "participants"} 
+    # Define Pydantic model mirroring expected schema
+    class CalendarEvent(BaseModel):
+        name: str
+        date: str
+        participants: list[str]
+
+    # Validate via Pydantic to ensure structured output compatibility
+    event = CalendarEvent.model_validate(json.loads(text))
+
+    assert event.name and event.date and event.participants 
