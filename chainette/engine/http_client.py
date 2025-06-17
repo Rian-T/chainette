@@ -24,6 +24,7 @@ __all__ = [
     "BaseHTTPClient",
     "OpenAIClient",
     "VLLMClient",
+    "OllamaHTTPClient",
 ]
 
 
@@ -137,5 +138,52 @@ class VLLMClient(BaseHTTPClient):  # noqa: D101
             resp.raise_for_status()
             data = resp.json()
             text = data["choices"][0]["message"]["content"]
+            out.append(_RequestOutput(text))
+        return out
+
+
+# --------------------------------------------------------------------------- #
+# Ollama REST API client                                                      #
+# --------------------------------------------------------------------------- #
+
+
+class OllamaHTTPClient(BaseHTTPClient):  # noqa: D101
+    """Client hitting Ollama's `/api/chat` endpoint.
+
+    Requires Ollama daemon running locally (default `http://localhost:11434`).
+    """
+
+    def __init__(self, endpoint: str | None, model: str):
+        super().__init__(endpoint or "http://localhost:11434", None, model)
+        import httpx
+
+        self._client = httpx.Client(base_url=self.endpoint, timeout=60)
+
+    def generate(self, *, prompts: List[str], sampling_params: Any | None = None):  # noqa: D401
+        import httpx
+
+        temperature: float | None = None
+        if sampling_params is not None and hasattr(sampling_params, "temperature"):
+            temperature = sampling_params.temperature  # type: ignore[attr-defined]
+
+        out: List[_RequestOutput] = []
+        for prompt in prompts:
+            payload = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+            }
+            if temperature is not None:
+                payload["options"] = {"temperature": temperature}
+
+            resp: httpx.Response = self._client.post("/api/chat", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+            # Response may differ depending on version: prefer message.content
+            text = (
+                data.get("message", {}).get("content")
+                if isinstance(data, dict)
+                else data["message"]["content"]
+            )
             out.append(_RequestOutput(text))
         return out 

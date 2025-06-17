@@ -72,6 +72,9 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
             elif self.backend == "openai":
                 from chainette.engine.http_client import OpenAIClient
                 self._engine = OpenAIClient(self.endpoint, self.api_key, self.model)
+            elif self.backend == "ollama_api":
+                from chainette.engine.http_client import OllamaHTTPClient
+                self._engine = OllamaHTTPClient(self.endpoint, self.model)
             else:
                 raise ValueError(f"Unsupported backend '{self.backend}'.")
         return self._engine

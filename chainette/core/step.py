@@ -81,7 +81,7 @@ class Step(Node):
         except KeyError:
             cfg = None  # engine not registered yet; assume supports guided params
 
-        if cfg is None or getattr(cfg, "backend", "vllm") != "openai":
+        if cfg is None or getattr(cfg, "backend", "vllm") not in ("openai",):
             guided_params = GuidedDecodingParams(json=json_schema)
             self.sampling.guided_decoding = guided_params
         else:
@@ -103,7 +103,7 @@ class Step(Node):
         # Lazily fetch tokenizer once
         cfg = get_engine_config(self.engine_name)
         backend = getattr(cfg, "backend", "vllm")
-        if backend not in ("ollama", "openai") and self.tokenizer is None:
+        if backend not in ("ollama", "ollama_api", "openai", "vllm_api") and self.tokenizer is None:
             self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
 
         if not inputs:
