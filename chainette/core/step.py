@@ -73,8 +73,21 @@ class Step(Node):
         self.yield_output = yield_output
 
         json_schema = self.output_model.model_json_schema()
-        guided_params = GuidedDecodingParams(json=json_schema)
-        self.sampling.guided_decoding = guided_params
+        # Guided decoding not supported by the OpenAI backend (it uses a different
+        # structured-output mechanism). Attach guided params only for back-ends
+        # that explicitly advertise support (vllm, ollama, etc.).
+        try:
+            cfg = get_engine_config(self.engine_name)
+        except KeyError:
+            cfg = None  # engine not registered yet; assume supports guided params
+
+        if cfg is None or getattr(cfg, "backend", "vllm") != "openai":
+            guided_params = GuidedDecodingParams(json=json_schema)
+            self.sampling.guided_decoding = guided_params
+        else:
+            # Ensure we don't accidentally send guided decoding hints.
+            if hasattr(self.sampling, "guided_decoding"):
+                self.sampling.guided_decoding = None
 
     def execute(
         self,
