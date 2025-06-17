@@ -177,7 +177,7 @@ Caching is optional ⇒ `EnginePool` is demoted to tiny dict of BaseHTTPClient.
 - [ ] **10. Benchmark parity vs local vLLM (doc in `BENCHMARK.md`)**
 
 ### Phase C – Ollama HTTP
-- [ ] **11. Implement `OllamaHTTPClient` & reuse existing prompt mapping**
+- [x] **11. Implement `OllamaHTTPClient` & reuse existing prompt mapping**
 - [ ] **12. Consolidate duplicated code into `BaseHTTPClient._chat(payload)`**
 
 ### Cleanup & Deprecation
