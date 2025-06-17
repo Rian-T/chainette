@@ -164,6 +164,16 @@ def register_engine(name: str, **kwargs):  # noqa: D401 – simple factory
         cfg_kwargs["backend"] = "vllm"
 
     cfg = EngineConfig(**cfg_kwargs)
+
+    # Warn if reasoning requested but backend lacks support
+    if cfg.enable_reasoning and cfg.backend not in ("vllm",):
+        import warnings
+        warnings.warn(
+            f"enable_reasoning is not supported for backend '{cfg.backend}'. The flag will be ignored.",
+            UserWarning,
+        )
+        cfg.enable_reasoning = False
+
     _REGISTRY[name] = cfg
     return cfg
 
