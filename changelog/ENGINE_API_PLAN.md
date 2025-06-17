@@ -162,7 +162,12 @@ Caching is optional ⇒ `EnginePool` is demoted to tiny dict of BaseHTTPClient.
       from chainette.engine.http_client import OpenAIClient
   ```
 - [x] **4. Update `registry.EngineConfig.engine` to return `OpenAIClient` when backend == "openai"**
-- [ ] **5. Guard `GuidedDecodingParams` & `enable_reasoning` in `Step.__init__`**
+- [x] **5. Guard `GuidedDecodingParams` & `enable_reasoning` in `Step.__init__`**
+    ```python
+    cfg = get_engine_config(self.engine_name)  # may raise KeyError if not yet registered
+    if cfg is None or cfg.backend != "openai":
+        self.sampling.guided_decoding = GuidedDecodingParams(json=json_schema)
+    ```
 - [ ] **6. Write tests `tests/test_openai_client.py` with `respx` mocks**
 - [ ] **7. Update CLI docs & README (OpenAI usage)**
 
