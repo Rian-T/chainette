@@ -25,7 +25,7 @@ def test_guided_params_disabled_for_openai():
 
 
 def test_guided_params_enabled_for_vllm():
-    register_engine("local_vllm", model="qwen1.5-1b", backend="vllm")
+    register_engine("local_vllm", model="qwen1.5-1b", backend="vllm_local")
     step = Step(
         id="s2",
         name="test2",

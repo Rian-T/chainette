@@ -62,7 +62,7 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
     def engine(self):
         """Return the instantiated engine (lazy-loaded once)."""
         if self._engine is None:
-            if self.backend == "vllm":
+            if self.backend == "vllm_local":
                 self._engine = self._create_vllm_engine()
             elif self.backend == "ollama":
                 self._engine = self._create_ollama_engine()
@@ -159,14 +159,14 @@ def register_engine(name: str, **kwargs):  # noqa: D401 – simple factory
     cfg_kwargs["extra"] = extra
     cfg_kwargs["name"] = name
 
-    # Default backend fallback
+    # Default backend fallback renamed to 'vllm_local'
     if "backend" not in cfg_kwargs:
-        cfg_kwargs["backend"] = "vllm"
+        cfg_kwargs["backend"] = "vllm_local"
 
     cfg = EngineConfig(**cfg_kwargs)
 
     # Warn if reasoning requested but backend lacks support
-    if cfg.enable_reasoning and cfg.backend not in ("vllm",):
+    if cfg.enable_reasoning and cfg.backend not in ("vllm_local",):
         import warnings
         warnings.warn(
             f"enable_reasoning is not supported for backend '{cfg.backend}'. The flag will be ignored.",
