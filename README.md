@@ -2,7 +2,7 @@
 
 **Chainette** is a tiny, type‑safe way to compose LLM pipelines in Python.
 
-*   ⚖️ ≈ 4 k LOC • MIT
+*   ⚖️ ≈ 2 k LOC core package • MIT
 *   🔌 Works with any vLLM-served model (local **vllm_local**), **OpenAI API**, **vLLM-Serve API**, or **Ollama** – choose at runtime
 *   📜 Inputs & outputs are **Pydantic** models – no more brittle string parsing
 *   🎯 Automatic JSON **guided decoding**: the model must reply with the schema you declare
