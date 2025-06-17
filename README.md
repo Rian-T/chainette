@@ -3,7 +3,7 @@
 **Chainette** is a tiny, type‑safe way to compose LLM pipelines in Python.
 
 *   ⚖️ < 350 LOC • MIT
-*   🔌 Works with any vLLM‑served model (Llama 3, Gemma, Mixtral…)
+*   🔌 Works with any vLLM‑served model (Llama 3, Gemma, Mixtral…) or OpenAI GPT-4 via HTTP
 *   📜 Inputs & outputs are **Pydantic** models – no more brittle string parsing
 *   🎯 Automatic JSON **guided decoding**: the model must reply with the schema you declare
 *   🗂️ Filesystem first – every run leaves reproducible artefacts (`graph.json`, step files, flattened view)
@@ -30,6 +30,15 @@ register_engine(
     dtype="bfloat16",
     gpu_memory_utilization=0.6,
     lazy=True,  # only start when needed
+)
+
+# --- NEW: OpenAI HTTP backend (optional) ---
+# Requires `pip install openai` and the env var `OPENAI_API_KEY`.
+register_engine(
+    name="gpt4o",
+    model="gpt-4.1-mini",  # or gpt-4o-2024-08-06
+    backend="openai",
+    endpoint="https://api.openai.com/v1",  # default
 )
 
 # 2. Define input/output schemas
@@ -201,6 +210,11 @@ engines:
     enable_reasoning: false
     devices: [0]
     lazy: true
+  - name: gpt4o
+    backend: openai
+    model: gpt-4.1-mini
+    endpoint: https://api.openai.com/v1
+    # `OPENAI_API_KEY` must be set in your environment
 ```
 
 ## Output Structure
