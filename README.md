@@ -11,7 +11,7 @@
 
 ## Install
 
-# Core (in-process vLLM only):
+# Core (HTTP back-ends only):
 pip install chainette
 
 # Add OpenAI + HTTP extras
@@ -255,12 +255,11 @@ Check the `examples/` directory:
 
 | backend value   | Description                  | Transport |
 |-----------------|------------------------------|-----------|
-| `vllm_local`    | In-process vLLM `LLM()`      | Python   |
 | `openai`        | OpenAI Chat completions      | HTTPS    |
 | `vllm_api`      | vLLM **OpenAI-compatible** server (`python -m vllm.entrypoints.openai.api_server`) | HTTP |
 | `ollama_api`    | Ollama REST (`ollama serve`) | HTTP |
 
-`enable_reasoning` is only honoured for `vllm_local`; other back-ends ignore it with a warning.
+`enable_reasoning` is currently available only for `vllm_api` when the remote server supports reasoning flags.
 
 ## Requirements
 

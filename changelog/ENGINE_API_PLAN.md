@@ -210,7 +210,8 @@ New TODOs (continue incremental tick-box style):
       Gracefully warns if required back-end extras (e.g. `vllm`) are missing.
 - [x] **20. Runtime guard**  
       At import time, raise clear `ImportError` only if user tries to run `serve-vllm` without the optional extra. Rest of Chainette must work fine w/out `vllm`.
-- [x] **21. Docs & README**
+- [x] **21. Docs & README**  
+  Updated `README.md` and `llm.txt` to remove all references to the deleted `vllm_local` backend and adjust backend tables accordingly.
 
 ### Phase D – Eliminate in-process vLLM (`vllm_local`) backend
 

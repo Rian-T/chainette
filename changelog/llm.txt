@@ -10,7 +10,6 @@ Purpose & Philosophy
    • Filesystem-first reproducibility: every run writes a full execution graph + step datasets + flattened view to disk.
    • Composability: Step / Apply / Branch nodes build directed graphs executed by **Chain**.
    • Engine back-ends:
-      – `vllm_local`: in-process GPU vLLM (legacy path, still fastest latency).
       – `openai`: HTTPS to OpenAI Chat API.
       – `vllm_api`: HTTP to vLLM's openai-compatible server (`python -m vllm.entrypoints.openai.api_server`).
       – `ollama_api`: HTTP to local Ollama daemon.
@@ -125,7 +124,7 @@ Coding Conventions for Contributors
 
 Extensibility Hot-Spots / TODOs
 -------------------------------
-• Engine layer complete: supports OpenAI, vLLM Serve, Ollama HTTP, plus legacy `vllm_local` path.
+• Engine layer complete: supports OpenAI, vLLM Serve, and Ollama HTTP back-ends.
 • Concurrency: Step batching uses simple slicing; could integrate asyncio or multiprocessing.
 • Streaming Tokens: integrate vLLM streaming into Chain & writer.
 • Merge Branch outputs into main flow (optional join nodes).
