@@ -81,7 +81,12 @@ class BaseHTTPClient:  # noqa: D101 – base contract
         with ThreadPoolExecutor(max_workers=min(8, len(msgs))) as pool:
             futures = [pool.submit(_run, i, m) for i, m in enumerate(msgs)]
             for fut in as_completed(futures):
-                idx, txt = fut.result()
+                try:
+                    idx, txt = fut.result()
+                except Exception as exc:  # noqa: BLE001
+                    # Safeguard: timeout or network issue – skip this prompt
+                    print(f"[WARN] Engine request failed or timed out: {exc}. Skipping item.")
+                    continue  # leave None in results
                 results[idx] = txt
 
         out = [_RequestOutput(txt or "") for txt in results]
@@ -114,6 +119,7 @@ class OpenAIClient(BaseHTTPClient):  # noqa: D101
             messages=messages,
             temperature=temperature,
             response_format={"type": "json_object"},
+            timeout=120,  # seconds – abort long-running requests
         )
         return resp.choices[0].message.content or ""
 
