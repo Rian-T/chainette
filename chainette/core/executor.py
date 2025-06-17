@@ -17,6 +17,8 @@ from .join_branch import JoinBranch
 from ..io.writer import RunWriter
 from chainette.utils.events import publish, BatchStarted, BatchFinished
 from chainette.engine.broker import EngineBroker
+from chainette.engine.process_manager import ensure_running, maybe_stop
+from chainette.engine.registry import get_engine_config
 
 __all__ = ["Executor"]
 
@@ -36,6 +38,7 @@ class Executor:  # noqa: D101
         """Execute *graph* on *inputs*; return final histories."""
         histories: List[Dict[str, Any]] = [{"chain_input": inp} for inp in inputs]
         nodes = self.graph.nodes()
+        active_cfg = None  # track current engine cfg for maybe_stop
         if debug:
             print("EXECUTOR order:", [n.id for n in nodes])
 
@@ -46,6 +49,16 @@ class Executor:  # noqa: D101
             # Execute node types
             # -------------------------------------------------- #
             if isinstance(obj, Step):
+                # Ensure required engine process is up
+                cfg = get_engine_config(obj.engine_name)
+
+                if cfg is not active_cfg:
+                    # switching engines – maybe stop previous lazy engine
+                    if active_cfg is not None:
+                        maybe_stop(active_cfg)
+                    ensure_running(cfg)
+                    active_cfg = cfg
+
                 new_inputs: List[BaseModel] = []
                 new_histories: List[Dict[str, Any]] = []
 
@@ -95,6 +108,9 @@ class Executor:  # noqa: D101
 
         EngineBroker.flush(force=True)
 
+        if active_cfg is not None:
+            maybe_stop(active_cfg)
+
         return histories
 
     # ------------------------------------------------------------------ #
@@ -116,6 +132,9 @@ class Executor:  # noqa: D101
         ]
 
         nodes = self.graph.nodes()
+        active_cfg = None  # track current engine cfg for maybe_stop
+        if debug:
+            print("EXECUTOR order:", [n.id for n in nodes])
 
         for n in nodes:
             obj = n.ref
@@ -124,6 +143,16 @@ class Executor:  # noqa: D101
             # Execute node types
             # -------------------------------------------------- #
             if isinstance(obj, Step):
+                # Ensure required engine process is up
+                cfg = get_engine_config(obj.engine_name)
+
+                if cfg is not active_cfg:
+                    # switching engines – maybe stop previous lazy engine
+                    if active_cfg is not None:
+                        maybe_stop(active_cfg)
+                    ensure_running(cfg)
+                    active_cfg = cfg
+
                 bs = self.batch_size if self.batch_size > 0 else len(inputs)
                 batch_no = 0
                 new_inputs: List[BaseModel] = []
@@ -171,4 +200,7 @@ class Executor:  # noqa: D101
             "batch_no": -1,
             "outputs": inputs,
             "histories": histories,
-        } 
+        }
+
+        if active_cfg is not None:
+            maybe_stop(active_cfg) 

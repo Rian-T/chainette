@@ -26,8 +26,12 @@ def _default_port(index: int) -> int:
 def ensure_running(cfg: EngineConfig) -> str:
     """Ensure an engine process for *cfg* is running, return base URL.
 
-    For non-`vllm_api` back-ends this is a no-op.
+    Accepts any object exposing `.backend`, `.endpoint`, `.model`, `.name`.
+    For test stubs that don't have these attributes we short-circuit.
     """
+    if not hasattr(cfg, "backend"):
+        return ""
+
     if cfg.backend != "vllm_api":
         return cfg.endpoint or ""
 
@@ -70,7 +74,13 @@ def ensure_running(cfg: EngineConfig) -> str:
 
 
 def maybe_stop(cfg: EngineConfig):
-    """Terminate process if Chainette spawned it and `lazy` is True."""
+    """Terminate process if Chainette spawned it and `lazy` is True.
+
+    Safely returns if *cfg* is not a full EngineConfig (e.g. SimpleNamespace in unit tests).
+    """
+    if not hasattr(cfg, "name"):
+        return
+
     proc: Optional[subprocess.Popen] = _PROCESSES.get(cfg.name)
     if proc is None:
         return
