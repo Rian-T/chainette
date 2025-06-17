@@ -188,7 +188,7 @@ Goal: fully decouple Chainette from the heavy `vllm` python import. All inferenc
 
 New TODOs (continue incremental tick-box style):
 
-- [ ] **16. Delete `vllm_local` backend path in `engine/registry.py`**  
+- [x] **16. Delete `vllm_local` backend path in `engine/registry.py`**  
       • Remove `_create_vllm_engine` and any `from vllm import LLM` import.  
       • Drop helper `_is_vllm_model`.
 - [x] **17. Mark `vllm` as *optional* in `pyproject.toml`**  
@@ -200,10 +200,10 @@ New TODOs (continue incremental tick-box style):
 - [x] **18. Update tests**  
       • Remove / rewrite tests that instantiate in-proc vLLM.  
       • Ensure test suite passes when `import vllm` raises `ModuleNotFoundError`.
-- [ ] **19. Implement `chainette engines serve-vllm` CLI helper**  
+- [x] **19. Implement `chainette engines serve-vllm` CLI helper**  
       Spawns `vllm serve <hf_repo>` (same as `python -m vllm.entrypoints.openai.api_server`) in a background *subprocess* and prints the base URL.  
       Gracefully warns if `vllm` executable is missing.
-- [ ] **20. Runtime guard**  
+- [x] **20. Runtime guard**  
       At import time, raise clear `ImportError` only if user tries to run `serve-vllm` without the optional extra. Rest of Chainette must work fine w/out `vllm`.
 - [ ] **21. Docs & README**  
       • Replace references to "in-process vLLM" with "vLLM Serve".  

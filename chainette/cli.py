@@ -422,5 +422,83 @@ def inspect_dag(
     show_dag_tree(step_ids)
     console.print(f"[green]DAG inspection complete – {len(step_ids)} top-level nodes shown.[/]")
 
+# --------------------------------------------------------------------------- #
+# vLLM Server helper (Phase D)                                               #
+# --------------------------------------------------------------------------- #
+
+
+@app.command("serve-vllm")
+def serve_vllm(
+    model: str = typer.Argument(..., help="HuggingFace repo or local path for the model to load."),
+    port: int = typer.Option(8000, "--port", "-p", help="Port to bind the OpenAI-compatible server."),
+    dtype: str = typer.Option(None, "--dtype", help="Torch dtype to load weights with (e.g. float16)."),
+    gpu_memory_utilization: float = typer.Option(None, "--gpu-mem", help="Limit GPU memory util (0-1 range)."),
+    open_browser: bool = typer.Option(False, "--open-browser", help="Open the /docs endpoint in browser once ready."),
+):
+    """Spawn a **vLLM** OpenAI-compatible server as a foreground subprocess.
+
+    This is a thin convenience wrapper around:
+
+        python -m vllm.entrypoints.openai.api_server --model <model> --port <port>
+
+    Additional flags like ``--dtype`` or ``--gpu-memory-utilization`` can be
+    provided via the options above.
+    """
+
+    import subprocess
+    import sys
+    import time
+    import webbrowser
+
+    try:
+        import vllm  # noqa: F401 – just to verify extra is installed
+    except ModuleNotFoundError:
+        console.print(
+            "[bold red]vLLM is not installed. Install with:[/] `pip install chainette[vllm]`",
+        )
+        raise typer.Exit(1)
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "vllm.entrypoints.openai.api_server",
+        "--model",
+        model,
+        "--port",
+        str(port),
+    ]
+
+    if dtype:
+        cmd += ["--dtype", dtype]
+    if gpu_memory_utilization is not None:
+        cmd += ["--gpu-memory-utilization", str(gpu_memory_utilization)]
+
+    console.print(f"[green]Starting vLLM server:[/] {' '.join(cmd)}")
+
+    try:
+        proc = subprocess.Popen(cmd)
+    except FileNotFoundError as e:
+        console.print("[bold red]Failed to start vLLM server – executable not found.[/]")
+        console.print(str(e))
+        raise typer.Exit(1)
+
+    # Optionally open browser after small delay
+    if open_browser:
+        time.sleep(2)
+        webbrowser.open(f"http://localhost:{port}/docs")
+
+    console.print("[cyan]vLLM server running – press Ctrl+C to stop.[/]")
+
+    try:
+        proc.wait()
+    except KeyboardInterrupt:
+        console.print("\n[bold]Stopping vLLM server…[/]")
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        console.print("[green]vLLM server stopped.[/]")
+
 if __name__ == "__main__":
     app() 

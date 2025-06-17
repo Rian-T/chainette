@@ -24,9 +24,7 @@ __all__ = [
 _REGISTRY: Dict[str, "EngineConfig"] = {}
 
 # `_is_vllm_model` used to decide whether to instantiate an in-process vLLM.
-# That backend has been removed – keep a stub for backward import stability.
-def _is_vllm_model(model: str) -> bool:  # pragma: no cover
-    return False
+# (Removed)
 
 
 @dataclass
