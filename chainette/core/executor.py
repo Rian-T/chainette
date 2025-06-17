@@ -15,7 +15,7 @@ from .apply import ApplyNode
 from .branch import Branch
 from .join_branch import JoinBranch
 from ..io.writer import RunWriter
-from chainette.utils.events import publish, BatchStarted, BatchFinished
+from chainette.utils.events import publish, BatchStarted, BatchFinished, StepTotalItems
 from chainette.engine.broker import EngineBroker
 from chainette.engine.process_manager import ensure_running, maybe_stop
 from chainette.engine.registry import get_engine_config
@@ -61,6 +61,10 @@ class Executor:  # noqa: D101
 
                 new_inputs: List[BaseModel] = []
                 new_histories: List[Dict[str, Any]] = []
+
+                # Announce total items once for accurate progress UI
+                if len(inputs) > 0:
+                    publish(StepTotalItems(step_id=obj.id, total=len(inputs)))
 
                 # Run in mini-batches managed here (Step ignores batch_size arg)
                 bs = self.batch_size if self.batch_size > 0 else len(inputs)
@@ -152,6 +156,10 @@ class Executor:  # noqa: D101
                         maybe_stop(active_cfg)
                     ensure_running(cfg)
                     active_cfg = cfg
+
+                # Announce total items once
+                if len(inputs) > 0:
+                    publish(StepTotalItems(step_id=obj.id, total=len(inputs)))
 
                 bs = self.batch_size if self.batch_size > 0 else len(inputs)
                 batch_no = 0

@@ -25,6 +25,7 @@ __all__ = [
     "BatchStarted",
     "BatchFinished",
     "StepFinished",
+    "StepTotalItems",
     "subscribe",
     "publish",
 ]
@@ -60,6 +61,13 @@ class BatchFinished(Event):
 class StepFinished(Event):
     step_id: str
     total_items: int
+
+
+# New event: total items per Step (for accurate progress bars)
+@dataclass(slots=True)
+class StepTotalItems(Event):
+    step_id: str
+    total: int
 
 
 # --------------------------------------------------------------------------- #
