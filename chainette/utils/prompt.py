@@ -24,13 +24,11 @@ def build_prompt(step, item_history: Dict[str, Any]) -> str:  # noqa: D401
     cfg = get_engine_config(step.engine_name)
     backend = getattr(cfg, "backend", "vllm")
 
-    if backend in ("openai", "vllm_api"):
-        # Embed system message first, followed by user content.
-        sys_msg = next((m["content"] for m in messages if m["role"] == "system"), "")
-        user_msg = next((m["content"] for m in messages if m["role"] == "user"), "")
-        return (f"[SYSTEM]\n{sys_msg}\n\n" if sys_msg else "") + user_msg
+    if backend in ("openai", "vllm_api", "ollama_api"):
+        # Return the raw messages list; HTTP clients will transmit as-is.
+        return messages
 
-    if backend in ("ollama", "ollama_api"):
+    if backend == "ollama":
         prompt_lines = [f"## {m['role']}\n{m['content']}" for m in messages]
         prompt_lines.append("## assistant\n")
         return "\n\n".join(prompt_lines)
