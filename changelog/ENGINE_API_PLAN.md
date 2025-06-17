@@ -168,7 +168,7 @@ Caching is optional ⇒ `EnginePool` is demoted to tiny dict of BaseHTTPClient.
     if cfg is None or cfg.backend != "openai":
         self.sampling.guided_decoding = GuidedDecodingParams(json=json_schema)
     ```
-- [ ] **6. Write tests `tests/test_openai_client.py` with `respx` mocks**
+- [x] **6. Write tests `tests/test_openai_client.py` with `respx` mocks**
 - [ ] **7. Update CLI docs & README (OpenAI usage)**
 
 ### Phase B – vLLM Serve
