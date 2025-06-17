@@ -178,7 +178,7 @@ Caching is optional ⇒ `EnginePool` is demoted to tiny dict of BaseHTTPClient.
 
 ### Phase C – Ollama HTTP
 - [x] **11. Implement `OllamaHTTPClient` & reuse existing prompt mapping**
-- [ ] **12. Consolidate duplicated code into `BaseHTTPClient._chat(payload)`**
+- [x] **12. Consolidate duplicated code into `BaseHTTPClient._chat(payload)`**
 
 ### Cleanup & Deprecation
 - [ ] **13. Deprecate `enable_reasoning` for backends that don't support**
