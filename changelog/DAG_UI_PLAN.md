@@ -166,4 +166,49 @@ Key pieces (all under `utils/`):
 - [ ] 9. Update `ELEGANCE_PLAN.md` with new LOC counts & philosophy alignment.
 
 -----------------------------------------------------------------------------
+## 6 – Visual Polish Roadmap (NEW)
+
+We want the DAG tree to **delight first-time users** while still fitting in
+80×24 terminals.  Inspiration: Rich's *Syntax* and *Panel* combinators.
+
+Planned upgrades:
+
+1. Step prefixes
+   • 📄 ApplyNode   (document icon)
+   • 🤖 Step (LLM call)
+   • 🪢 Branch root
+   • 🔀 Parallel wrapper
+
+2. Color palette  (accessible, dark-mode friendly)
+   • Cyan   → main linear flow
+   • Magenta→ branch names
+   • Grey   → parallel wrapper + dim depth lines
+   • Yellow → warnings / missing types
+
+3. Depth lines
+   Use Rich's `Tree.guide_style` with dim grey lines so nested levels are
+   visually clear (see screenshot above).
+
+4. Count badges
+   Show item count processed so far per Step when the progress handler
+   updates → live tree refresh.
+
+5. Collapsible long branch lists
+   If a parallel wrapper has >4 branches, show only first 2 + "N more"; user
+   can pass `--max-branches` flag to CLI to expand.
+
+6. Glyph fallback
+   Icons default to ASCII fallback when `$TERM` lacks UTF-8 or Rich cannot
+   detect a font (auto-switch via `rich.console.ConsoleEncoding`).
+
+Implementation tasks (add to TODO checklist):
+
+- [ ] 11. Add `utils.dag.RenderOptions` dataclass (icons_on, max_branches, …).
+- [ ] 12. Enhance `build_rich_tree` to accept opts and apply icons/colors.
+- [ ] 13. CLI `--no-icons`, `--max-branches` flags forward to tree builder.
+- [ ] 14. Live badge updates: expose `update_step_badge(step_id, count)` in
+        `logging_v3` and call from Executor after each batch.
+- [ ] 15. Snapshot test rendering with unicode + ascii modes.
+
+-----------------------------------------------------------------------------
 ### End-of-File 
