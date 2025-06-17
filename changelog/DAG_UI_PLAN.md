@@ -110,12 +110,46 @@ Key pieces (all under `utils/`):
 -----------------------------------------------------------------------------
 ## 5 – TODO Checklist
 
-- [ ] 0. Branch `dag-ui` created.  
-- [ ] 1. Implement `utils/dag.py` (≤ 70 LOC).  
+- [x] 0. Branch `dag-ui` created.  
+  ```bash
+  # one-time branch creation
+  git checkout -b dag-ui
+  ```
+
+- [x] 1. Implement `utils/dag.py` (≤ 70 LOC).  
+  ```python
+  # chainette/utils/dag.py (excerpt)
+  def iter_nodes(chain: Chain):
+      def _walk(objs, depth):
+          for obj in objs:
+              if isinstance(obj, list):
+                  yield depth, obj
+                  for br in obj:
+                      yield depth + 1, br
+                      _walk(br.steps, depth + 2)
+              elif isinstance(obj, Branch):
+                  yield depth, obj
+                  _walk(obj.steps, depth + 1)
+              else:
+                  yield depth, obj
+
+  def build_rich_tree(chain: Chain):
+      from rich.tree import Tree
+      tree = Tree("[bold]Execution DAG[/]")
+      _add(tree, chain.steps)
+      return tree
+  ```
+
 - [ ] 2. Add `StepTotalItems` event in `utils.events`.  
 - [ ] 3. Update `core.executor.Executor` to publish totals.  
 - [ ] 4. Rewrite `utils.logging_v2` → `logging_v3` (keep alias import).  
-- [ ] 5. Replace DAG calls in `cli.py`.  
+- [x] 5. Replace DAG calls in `cli.py`.  
+  ```diff
+  - step_ids = [...]
+  - show_dag_tree(step_ids)
+  + show_dag_tree(chain_obj)
+  ```
+
 - [ ] 6. Add two unit tests.  
 - [ ] 7. Update `README.md` screenshots & docs.  
 - [ ] 8. ⚙️ Run `poetry run pytest`; ensure no regressions.  
