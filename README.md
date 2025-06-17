@@ -3,7 +3,7 @@
 **Chainette** is a tiny, type‑safe way to compose LLM pipelines in Python.
 
 *   ⚖️ < 350 LOC • MIT
-*   🔌 Works with any vLLM‑served model (Llama 3, Gemma, Mixtral…) or OpenAI GPT-4 via HTTP
+*   🔌 Works with any vLLM-served model (local **vllm_local**), **OpenAI API**, **vLLM-Serve API**, or **Ollama** – choose at runtime
 *   📜 Inputs & outputs are **Pydantic** models – no more brittle string parsing
 *   🎯 Automatic JSON **guided decoding**: the model must reply with the schema you declare
 *   🗂️ Filesystem first – every run leaves reproducible artefacts (`graph.json`, step files, flattened view)
@@ -11,9 +11,14 @@
 
 ## Install
 
-```bash
-pip install chainette           # or: poetry add chainette
-```
+# Core (in-process vLLM only):
+pip install chainette
+
+# Add OpenAI + HTTP extras
+pip install chainette[openai]
+
+# Add Ollama HTTP extras
+pip install chainette[ollama]
 
 ## Quick Start
 
@@ -39,6 +44,21 @@ register_engine(
     model="gpt-4.1-mini",  # or gpt-4o-2024-08-06
     backend="openai",
     endpoint="https://api.openai.com/v1",  # default
+)
+
+# 1c. vLLM Serve HTTP backend
+register_engine(
+    name="vllm_api",
+    model="gpt-4o-2024-08-06",
+    backend="vllm_api",
+    endpoint="http://localhost:8000/v1",  # vllm --serve
+)
+
+# 1d. Ollama HTTP backend
+register_engine(
+    name="qwen_local",
+    model="qwen2.5-instruct",
+    backend="ollama_api",  # Requires `ollama serve`
 )
 
 # 2. Define input/output schemas
@@ -231,12 +251,34 @@ Check the `examples/` directory:
 - `multi_doc_summary_eval.py`: Document summarization with quality scoring
 - `join/inc_dec_join.py`: Tiny pure-Python Join demo (no LLM needed)
 
+## Supported Back-ends
+
+| backend value   | Description                  | Transport |
+|-----------------|------------------------------|-----------|
+| `vllm_local`    | In-process vLLM `LLM()`      | Python   |
+| `openai`        | OpenAI Chat completions      | HTTPS    |
+| `vllm_api`      | vLLM **OpenAI-compatible** server (`python -m vllm.entrypoints.openai.api_server`) | HTTP |
+| `ollama_api`    | Ollama REST (`ollama serve`) | HTTP |
+
+`enable_reasoning` is only honoured for `vllm_local`; other back-ends ignore it with a warning.
+
 ## Requirements
 
-- Python 3.9+
-- vLLM for model serving
-- Pydantic v2
-- Hugging Face datasets
+Mandatory: Python ≥ 3.9, Pydantic v2, `datasets`.
+
+Optional back-ends:
+
+```bash
+# In-process vLLM (GPU):
+pip install vllm
+
+# HTTP OpenAI:
+pip install openai
+
+# HTTP Ollama
+brew install ollama  # macOS helper
+# or see https://ollama.ai
+```
 
 ## License
 

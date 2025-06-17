@@ -9,7 +9,12 @@ Purpose & Philosophy
    • Prompt engineering + schema enforcement via **guided JSON decoding** (vLLM GuidedDecodingParams) ensures models must comply with declared schema.
    • Filesystem-first reproducibility: every run writes a full execution graph + step datasets + flattened view to disk.
    • Composability: Step / Apply / Branch nodes build directed graphs executed by **Chain**.
-   • Engine-agnostic in theory, but deliberately minimal: currently only vLLM back-end for simplicity; registry designed for future back-ends.
+   • Engine back-ends:
+      – `vllm_local`: in-process GPU vLLM (legacy path, still fastest latency).
+      – `openai`: HTTPS to OpenAI Chat API.
+      – `vllm_api`: HTTP to vLLM's openai-compatible server (`python -m vllm.entrypoints.openai.api_server`).
+      – `ollama_api`: HTTP to local Ollama daemon.
+      Registry auto-instantiates the correct thin client.
    • Resource efficiency: engines are lazy-loaded & explicitly released when a different engine is needed or at chain end.
    • <dependency-light> mindset: core code in ~ dozen files, zero optional extras.
 
@@ -120,7 +125,7 @@ Coding Conventions for Contributors
 
 Extensibility Hot-Spots / TODOs
 -------------------------------
-• Engine Layer: add support for OpenAI API, Ollama, Endpoint proxies.
+• Engine layer complete: supports OpenAI, vLLM Serve, Ollama HTTP, plus legacy `vllm_local` path.
 • Concurrency: Step batching uses simple slicing; could integrate asyncio or multiprocessing.
 • Streaming Tokens: integrate vLLM streaming into Chain & writer.
 • Merge Branch outputs into main flow (optional join nodes).
