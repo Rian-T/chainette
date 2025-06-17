@@ -71,6 +71,8 @@ Implementation is small wrappers around `httpx.AsyncClient` (sync shim uses `any
 endpoint: str | None   # e.g. "https://api.openai.com/v1"
 api_key: str | None    # read from env if omitted
 backend: Literal["openai", "vllm_api", "ollama_api"]
+lazy: bool = True
+port: int | None = None
 ```
 `EngineConfig.engine` now returns a light *client* – no longer a fat model.
 Caching is optional ⇒ `EnginePool` is demoted to tiny dict of BaseHTTPClient.
@@ -283,23 +285,48 @@ register_engine(name="my_model", model="mistralai/Mixtral-8x7B", backend="vllm_a
 
 ### New implementation tasks
 
-- [ ] **23. Extend `EngineConfig`**  
-      Add `lazy: bool = True` and `port: int | None`.  
-      Infer default port = 8000 + *index* to avoid clashes when auto-spawning.
-- [ ] **24. Add `engine.process` field** to cache the `subprocess.Popen` handle
-      when Chainette spawns a server.
-- [ ] **25. Implement `EngineProcessManager`**  
-      Tiny helper (< 80 LOC) exposing:  
-      `ensure_running(cfg: EngineConfig) -> str` (returns base_url) and
-      `maybe_stop(cfg: EngineConfig)`.
-- [ ] **26. Modify `Executor` logic**  
-      • If step.engine.lazy → call `ensure_running` just-in-time and
-        `maybe_stop` once the next step uses a different engine.  
-      • If any engine.lazy is False → start all at beginning, stop all at end.
-- [ ] **27. CLI helper `engines serve-vllm` → rename to `engines warmup-vllm`**  
-      Internally forwards to `EngineProcessManager.ensure_running`.
-- [ ] **28. Unit tests** for process lifecycle with a **fake Python script**
-      (`tests/fake_vllm_server.py`) simulating `/v1/models`.
+- [x] **23. Extend `EngineConfig`**  
+  ```python
+  @dataclass
+  class EngineConfig:
+      # ... existing fields ...
+      lazy: bool = True      # ✔ added earlier
+      port: int | None = None  # ✔ default port selection
+  ```
+- [x] **24. Add `engine.process` field** to cache the `subprocess.Popen` handle
+  ```python
+  process: Optional[Any] = field(default=None, repr=False, compare=False)
+  ```
+- [x] **25. Implement `EngineProcessManager`**  
+  ```python
+  # chainette/engine/process_manager.py
+  def ensure_running(cfg):
+      if cfg.backend != "vllm_api": return cfg.endpoint or ""
+      # spawn `vllm entrypoints.openai.api_server` and cache handle
+  ```
+- [x] **26. Modify `Executor` logic**  
+  ```python
+  # core/executor.py (inside Step branch)
+  cfg = get_engine_config(obj.engine_name)
+  if cfg is not active_cfg:
+      maybe_stop(active_cfg)
+      ensure_running(cfg)
+      active_cfg = cfg
+  ```
+- [x] **27. CLI helper replaced by `chainette warmup`**  
+  ```python
+  @app.command("warmup")
+  def warmup(chain_file: Path, ...):
+      # loads chain, instantiates all non-lazy engines
+  ```
+- [x] **28. Unit tests** for process lifecycle with a **fake Python script**
+  ```python
+  def test_ensure_running_no_vllm(monkeypatch):
+      monkeypatch.setattr(process_manager, "subprocess", DummyNS)
+      cfg = register_engine(...)
+      url = process_manager.ensure_running(cfg)
+      process_manager.maybe_stop(cfg)
+  ```
 - [ ] **29. Remove or adapt `EnginePool`** – no in-proc caching needed; pool is
       now a map *engine_name → BaseHTTPClient* (HTTP) + optional process handle.
 - [ ] **30. Documentation update**  
