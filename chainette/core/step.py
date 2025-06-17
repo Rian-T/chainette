@@ -102,7 +102,8 @@ class Step(Node):
 
         # Lazily fetch tokenizer once
         cfg = get_engine_config(self.engine_name)
-        if getattr(cfg, "backend", "vllm") != "ollama" and self.tokenizer is None:
+        backend = getattr(cfg, "backend", "vllm")
+        if backend not in ("ollama", "openai") and self.tokenizer is None:
             self.tokenizer = AutoTokenizer.from_pretrained(cfg.model)
 
         if not inputs:
