@@ -169,7 +169,7 @@ Caching is optional ⇒ `EnginePool` is demoted to tiny dict of BaseHTTPClient.
         self.sampling.guided_decoding = GuidedDecodingParams(json=json_schema)
     ```
 - [x] **6. Write tests `tests/test_openai_client.py` with `respx` mocks**
-- [ ] **7. Update CLI docs & README (OpenAI usage)**
+- [x] **7. Update CLI docs & README (OpenAI usage)**
 
 ### Phase B – vLLM Serve
 - [ ] **8. Implement `VLLMClient` (+ unit tests)**
