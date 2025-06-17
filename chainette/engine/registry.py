@@ -50,6 +50,10 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
     # Internal cache for the instantiated engine object
     _engine: Optional[LLM] = field(init=False, default=None, repr=False)
 
+    # HTTP-specific fields
+    endpoint: Optional[str] = None
+    api_key: Optional[str] = None
+
     # -------------------------------------------------- #
     # Public helpers
     # -------------------------------------------------- #
