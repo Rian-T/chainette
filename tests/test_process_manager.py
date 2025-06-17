@@ -16,12 +16,15 @@ class DummyProc:  # noqa: D401
 
 def test_ensure_running_no_vllm(monkeypatch):
     # Monkeypatch subprocess.Popen to avoid spawning
-    monkeypatch.setattr(process_manager, "subprocess", types.SimpleNamespace(Popen=lambda *a, **k: DummyProc(), DEVNULL=None))
+    def fake_popen(cmd, stdout=None, stderr=None, env=None):
+        assert env and env.get("FOO") == "BAR"
+        return DummyProc()
+    monkeypatch.setattr(process_manager, "subprocess", types.SimpleNamespace(Popen=fake_popen, DEVNULL=None))
     monkeypatch.setattr(process_manager, "time", types.SimpleNamespace(sleep=lambda x: None))
     import sys
     sys.modules['vllm'] = types.ModuleType('vllm')
     # Register engine without endpoint
-    cfg = register_engine("eproc", model="dummy", backend="vllm_api")
+    cfg = register_engine("eproc", model="dummy", backend="vllm_api", extra_env={"FOO": "BAR"})
     url = process_manager.ensure_running(cfg)
     assert url.startswith("http://localhost:")
     assert cfg.process is not None

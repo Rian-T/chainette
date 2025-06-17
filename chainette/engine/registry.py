@@ -148,15 +148,7 @@ def register_engine(name: str, **kwargs):  # noqa: D401 – simple factory
 
     # Deprecation shim for legacy configs
     if cfg_kwargs.get("backend") == "vllm_local":
-        import warnings
-        warnings.warn(
-            "'backend: vllm_local' is deprecated and will be removed in a future release. "
-            "Please migrate to 'backend: vllm_api' and set 'endpoint: http://localhost:8000/v1' (or your server URL).",
-            UserWarning,
-            stacklevel=2,
-        )
-        cfg_kwargs["backend"] = "vllm_api"
-        cfg_kwargs.setdefault("endpoint", "http://localhost:8000/v1")
+        raise ValueError("backend 'vllm_local' is no longer supported. Use 'vllm_api' instead.")
 
     cfg = EngineConfig(**cfg_kwargs)
 

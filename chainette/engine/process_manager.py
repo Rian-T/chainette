@@ -63,7 +63,9 @@ def ensure_running(cfg: EngineConfig) -> str:
         *cfg.extra_serve_flags,
     ]
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # noqa: S603,S607
+    env = {**os.environ, **(cfg.extra_env or {})}
+
+    proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)  # noqa: S603,S607
     _PROCESSES[cfg.name] = proc
     cfg.process = proc  # save handle in config
     cfg.endpoint = f"http://localhost:{port}/v1"
