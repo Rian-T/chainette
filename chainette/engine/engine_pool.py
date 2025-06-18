@@ -45,7 +45,11 @@ class EnginePool:  # noqa: D101
         if len(self._lru) > self.max_size:
             old_name, _ = self._lru.popitem(last=False)
             self._cache.pop(old_name, None)
-            get_engine_config(old_name).release_engine()
+            try:
+                get_engine_config(old_name).release_engine()
+            except KeyError:
+                # Registry entry might have been cleared by test fixture
+                pass
         return eng
 
     # -------------------------------------------------- #

@@ -85,8 +85,22 @@ def build_rich_tree(chain: Chain, opts: RenderOptions | None = None):  # noqa: D
                 bnode = parent.add(f"[magenta]{obj.name}[/]")
                 _add(bnode, obj.steps)
             else:  # Step / Apply / JoinBranch
+                # Compose label – step id plus backend/engine name in dimmed style
                 emoji = getattr(obj, "emoji", "") if opts.icons_on else ""
-                label = f"{emoji} [cyan]{obj.id}[/]" if emoji else f"[cyan]{obj.id}[/]"
+                try:
+                    from chainette.engine.registry import get_engine_config  # local import to avoid hard dep when printing only
+
+                    if hasattr(obj, "engine_name"):
+                        cfg = get_engine_config(obj.engine_name)
+                        backend = cfg.backend
+                        eng_lbl = f" [dim]({backend})[/]"
+                    else:
+                        eng_lbl = ""
+                except Exception:  # pragma: no cover – printing continues even if something goes wrong
+                    eng_lbl = ""
+
+                label_main = f"{emoji} [cyan]{obj.id}[/]" if emoji else f"[cyan]{obj.id}[/]"
+                label = label_main + eng_lbl
                 parent.add(label)
 
     _add(tree, chain.steps)

@@ -83,6 +83,16 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
                 self._engine = OllamaHTTPClient(self.endpoint, self.model)
             else:
                 raise ValueError(f"Unsupported backend '{self.backend}'.")
+
+            # ----- UI notification ------------------------------------------------
+            try:
+                from chainette.utils.logging import console  # noqa: WPS433
+
+                console.print(
+                    f"[green]🚀 Started engine '[bold]{self.name}[/]' ({self.backend})[/]"
+                )
+            except Exception:  # pragma: no cover
+                pass
         return self._engine
 
     def release_engine(self):
@@ -98,6 +108,16 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
                 del engine_to_release.llm_engine
             
             del engine_to_release
+
+            # ----- UI notification ------------------------------------------------
+            try:
+                from chainette.utils.logging import console  # noqa: WPS433
+
+                console.print(
+                    f"[red]🗑️ Released engine '[bold]{self.name}[/]' ({self.backend})[/]"
+                )
+            except Exception:
+                pass
         else:
             pass # No active engine instance to release
 

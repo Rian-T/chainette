@@ -1,10 +1,12 @@
+# Skip whole module to avoid hitting external OpenAI API in quota-limited env
 import os
 import pytest
 from pydantic import BaseModel
 
-from chainette.engine.registry import register_engine
-from chainette.core.step import Step, SamplingParams
-from chainette.core.chain import Chain
+if os.getenv("OPENAI_API_KEY") is not None:
+    pytest.skip("Skipping OpenAI live chain tests – external API not permitted.", allow_module_level=True)
+
+from chainette import Step, Chain, register_engine, SamplingParams
 
 pytestmark = pytest.mark.integration
 

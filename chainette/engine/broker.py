@@ -55,7 +55,12 @@ class _BrokerImpl:  # noqa: D401
         for name in list(self._track.keys()):
             tr = self._track[name]
             if force or (tr.ref == 0 and now - tr.last > _ID_IDLE_SEC):
-                get_engine_config(name).release_engine()
+                try:
+                    cfg = get_engine_config(name)
+                    cfg.release_engine()
+                except KeyError:
+                    # Engine config might have been cleared by test fixture – ignore.
+                    pass
                 self._track.pop(name, None)
                 ENGINE_POOL.pop(name)
 
