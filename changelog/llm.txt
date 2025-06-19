@@ -10,21 +10,21 @@ Purpose & Philosophy
    • Filesystem-first reproducibility: every run writes a full execution graph + step datasets + flattened view to disk.
    • Composability: Step / Apply / Branch nodes build directed graphs executed by **Chain**.
    • Engine back-ends:
-      – `openai`: HTTPS to OpenAI Chat API.
-      – `vllm_api`: HTTP to vLLM's openai-compatible server (`python -m vllm.entrypoints.openai.api_server`).
+      – `openai`: HTTPS to OpenAI Chat API with structured outputs.
+      – `vllm_api`: HTTP to vLLM's openai-compatible server (`vllm serve`).
       – `ollama_api`: HTTP to local Ollama daemon.
-      Registry auto-instantiates the correct thin client.
+      Registry auto-instantiates the correct thin HTTP client.
    • Resource efficiency: engines are lazy-loaded & explicitly released when a different engine is needed or at chain end.
    • <dependency-light> mindset: core code in ~ dozen files, zero optional extras.
 
 High-Level Architecture
 -----------------------
 chainette/
-  core/   → execution graph primitives (Node, Step, Branch, Apply, Chain)
-  engine/ → EngineConfig dataclass + global registry (register_engine / get_engine_config)
-  io/     → RunWriter (writes datasets / graph) + helpers
-  utils/  → templates, json_schema prompt helper, ids, constants, banner, debug
-  cli.py  → rich+typer powered CLI (engines | inspect | run | warmup/kill todo)
+  core/   → execution graph primitives (Node, Step, Branch, Apply, Chain, Graph, Executor)
+  engine/ → HTTP clients + EngineConfig + broker/pool for stateless backends
+  io/     → RunWriter + StreamWriter (chunked/streaming JSONL/Parquet)
+  utils/  → templates, json_schema prompt helper, ids, constants, banner, debug, events, DAG rendering
+  cli.py  → rich+typer powered CLI (engines | inspect | run | warmup/kill)
 
 Key Abstractions
 ----------------
@@ -32,149 +32,335 @@ Key Abstractions
 
 • Step(Node):
   - Represents **one LLM call**.
-  - Fields: id, name, input_model, output_model, engine_name, SamplingParams, system_prompt, user_prompt, etc.
+  - Fields: id, name, output_model, engine_name, SamplingParams, system_prompt, user_prompt, etc.
   - On init, builds combined `system_prompt` = user_system + JSON-schema instruction (unless caller overrides `output_format_instruction`).
-  - Uses `GuidedDecodingParams(json_schema)` to bind output JSON to `output_model`.
+  - Uses `guided_json` parameter for vLLM or `response_format` for OpenAI to bind output JSON to `output_model`.
   - Execution logic:
     1. Build chat prompt via jinja2 render of templates against per-item history.
-    2. Call `engine.generate` (vLLM) with prompts + sampling.
+    2. Call `engine.generate` (HTTP client) with prompts + sampling.
     3. Parse first completion, validate JSON → pydantic `output_model`.
     4. Update history & run writer, optionally attach reasoning if engine returned `.reasoning`/`.reasoning_content`.
     5. Returns parsed outputs + updated histories.
 
 • ApplyNode(Node): wraps a pure python function: `fn(IN) -> List[OUT]`.
-  - Accepts optional explicit `input_model` / `output_model` types (used by CLI inspector).
+  - Accepts optional explicit `output_model` types (used by CLI inspector).
 
 • Branch(Node): named sequence of nodes; executed in isolation w/ history copies; outputs **not merged** back into main chain (design: use branches at chain tail for parallel gen).
 
 • JoinBranch(Node): subclass of Branch that merges its final output back into the parent history under a chosen *alias*, enabling downstream steps to consume `{{alias}}` variables.
 
+• Graph: True DAG representation with `Node`s and connections. Each Node knows its downstream connections.
+
+• Executor: Generic DAG walker that handles batching, engine lifecycle, and node execution order.
+
+• AsyncExecutor: Optional async variant using `anyio` for concurrent execution.
+
 • Chain:
   - Holds top-level list `steps: List[Union[Node, List[Branch]]]` (allows parallel branches).
   - Maintains per-item histories so templates can reference previous outputs via `{{step_id.field}}`.
-  - Handles engine life-cycle:
-    • keeps `active_step_engine_config`; releases when switching engine or entering branch list.
-    • uses `gc.collect()` + `torch.cuda.empty_cache()` on release.
-  - Writes results through `RunWriter`.
+  - Delegates execution to `Executor` with proper engine lifecycle management.
+  - Writes results through `RunWriter` or `StreamWriter`.
   - Params: name, emoji, batch_size (controls Step batching).
 
-• Execution engine
-  - Chain executes via Executor (generic DAG walker) [NEW].
-  - AsyncExecutor variant provides `async run` using anyio.
+Engine Layer (HTTP-Based)
+-------------------------
+**HTTP Client Architecture**: All LLM inference goes through stateless HTTP clients - no in-process model loading.
 
-Engine Layer
-------------
-EngineConfig (dataclass): name, model, dtype, gpu_memory_utilization, etc. → lazily instantiates `vllm.LLM`. Supports reasoning flags.
+• `engine.http_client.BaseHTTPClient`: Common interface for all backends
+• `engine.http_client.OpenAIClient`: Uses OpenAI SDK with structured outputs (`client.responses.parse`)
+• `engine.http_client.VLLMClient`: HTTP client for vLLM serve with `guided_json` parameter
+• `engine.http_client.OllamaHTTPClient`: REST client for Ollama `/api/chat` endpoint
+
+**Engine Broker**: Lazy spin-up + ref-counted release:
+```python
+with EngineBroker.acquire("gemma_ollama") as eng:
+    eng.generate(prompts, sampling_params)
+```
+- `engine.broker.EngineBroker`: Context manager for engine acquisition/release
+- `engine.engine_pool.EnginePool`: LRU cache with reference counting
+- Executor calls `EngineBroker.flush(force=True)` at run end
+
+**vLLM Server Management**: Automatic subprocess spawning and health checks:
+- Uses `vllm serve` command exclusively (never python module path)
+- Robust startup polling with `/health` endpoint
+- Configurable timeout and exponential back-off
+- Live log streaming during startup with Rich panels
+- Automatic flag mapping from `EngineConfig` to CLI arguments
+- GPU selection via `gpu_ids` field and `CUDA_VISIBLE_DEVICES`
+
+EngineConfig (dataclass): 
+- HTTP fields: `endpoint`, `api_key`, `backend` (openai/vllm_api/ollama_api)
+- vLLM serve fields: `startup_timeout`, `gpu_ids`, `extra_serve_flags`, `extra_env`
+- Model config: `model`, `dtype`, `gpu_memory_utilization`, etc.
+- Reasoning support: `enable_reasoning`, `reasoning_parser`
+
 Registry helpers:
-  register_engine(...) → saves EngineConfig under name.
-  get_engine_config(name).
-  release_engine() frees GPU mem; implemented w/ best-effort deletion of vllm internals.
+- `register_engine(...)` → saves EngineConfig under name
+- `get_engine_config(name)` → retrieves config
+- HTTP clients are lightweight and safe to cache globally
 
 Prompt & Template System
 ------------------------
 • Templates rendered by jinja2 (`utils.templates.render`).
 • Tokenizer (HF) chat template used to format system/user messages.
 • Context available to templates: each model's fields accessible via `{{step_id.field}}` or model object itself.
+• Separated into `utils.prompt` (pure functions) and `utils.context` (history builders).
 
 I/O & Persistence
 -----------------
-RunWriter collects step outputs (split per step id → snake_case) and flushes to disk as HF `DatasetDict`.
+**RunWriter**: Collects step outputs (split per step id → snake_case) and flushes to disk as HF `DatasetDict`.
+
+**StreamWriter**: New streaming writer for large datasets:
+- Chunked execution with rolling filenames (`000.jsonl`, `001.jsonl`, ...)
+- Honors `max_lines_per_file` setting
+- Supports both JSONL and Parquet formats (via `pyarrow` optional extra)
+- On-the-fly flattening (no full merge in memory)
+- Join-aware merging with `<alias>.<field>` column naming
+
 Artifacts per run:
   ‹output_dir›/
-    graph.json             → node execution order metadata.
-    <step_id>/0.jsonl      → raw outputs per step.
-    flattened/0.jsonl      → optional cross-step merged dataset.
-    metadata.json          → misc run info.
-Supports CSV output, chunking (max_lines_per_file) (TODO not fully implemented).
+    graph.json             → node execution order metadata
+    <step_id>/000.jsonl    → raw outputs per step (chunked)
+    flattened/000.jsonl    → cross-step merged dataset (chunked)
+    metadata.json          → misc run info
 
 CLI Commands (typer)
 --------------------
-chainette engines   → list registered back-ends.
-chainette inspect   → static type check of chain (I/O compat, warnings for Apply w/out types).
-chainette run       → run a chain from python file on inputs.jsonl, writes outputs.
-#warmup / kill to be added.
+- `chainette engines` → list registered back-ends
+- `chainette inspect` → static type check of chain (I/O compat, warnings)
+- `chainette inspect-dag` → display execution DAG tree only
+- `chainette run` → run a chain from python file on inputs.jsonl, writes outputs
+- `chainette run-yaml` → run a chain from YAML definition
+- `chainette warmup` → pre-warm engines (spawn vLLM servers)
+
+CLI flags:
+- `--stream-writer` → use chunked streaming output
+- `--quiet` → suppress DAG tree and use minimal logging
+- `--json-logs` → structured JSON logging instead of Rich UI
+- `--no-icons` → ASCII/monochrome DAG rendering
+- `--max-branches N` → collapse large parallel wrappers in DAG view
+
+YAML Support
+------------
+Declarative chain definition via YAML:
+```yaml
+name: "Translation Pipeline"
+steps:
+  - type: step
+    id: translate
+    engine: gpt4_turbo
+    system_prompt: "Translate to French"
+    user_prompt: "{{text}}"
+    output_model: TranslatedText
+  - type: branch
+    name: summary_branch
+    steps:
+      - type: step
+        id: summarize
+        engine: gpt4_turbo
+        user_prompt: "Summarize: {{translate.text}}"
+        output_model: Summary
+```
+
+Features:
+- Full schema validation against JSON Schema
+- Symbol resolution from provided Python globals
+- Support for all node types (Step, Apply, Branch, JoinBranch)
+- Branching and joining constructs
+- CLI integration with `chainette run-yaml`
+
+Branch Joins
+-----------
+Merge outputs from parallel branches back into the main flow:
+```python
+# Python DSL
+branch_a = Branch("translate_fr", steps=[fr_step]).join("french")
+branch_b = Branch("translate_es", steps=[es_step]).join("spanish")
+parallel_translations = [branch_a, branch_b]
+
+# Downstream access
+summary_step = Step(
+    user_prompt="Summarize French: {{french.text}} and Spanish: {{spanish.text}}"
+)
+```
+
+JoinBranch automatically merges final outputs into parent history under specified alias.
+
+Event System & Progress Tracking
+--------------------------------
+**EventBus**: Lightweight pub/sub system (≤40 LOC):
+- Events: `BatchStarted`, `BatchFinished`, `StepTotalItems`, etc.
+- Publisher/subscriber pattern for decoupled logging
+
+**Progress Tracking**: Fine-grained progress bars:
+- `StepTotalItems` event published at batch start for correct totals
+- `BatchFinished` advances progress by batch count
+- Smooth percentage increases instead of 0→100 jumps
+
+DAG UI & Progress Bars
+---------------------
+**Rich Tree Visualization**: Hierarchical DAG rendering with:
+- Tree structure mirrors actual execution order
+- Color-coded node types (Step: cyan, Branch: magenta, Apply: yellow)
+- Engine labels shown per Step (e.g., "translate [gpt-4]")
+- Unicode or ASCII fallback via `--no-icons`
+- Collapsible large parallel sections via `--max-branches`
+
+**Live Progress**: Per-step progress bars during execution:
+- Total items and completion count
+- Badge updates after each batch
+- Rich Live context for real-time updates
+
+**Visual Polish**: Icons and styling:
+- 🤖 Step (LLM call)
+- 📄 ApplyNode (pure Python)
+- 🪢 Branch root
+- 🔀 Parallel wrapper
+- Engine name badges in muted colors
 
 Utilities
 ---------
-• ids.snake_case / new_run_id → naming helpers.
-• json_schema.generate_json_output_prompt → builds instruction for LLM to follow schema.
-• debug.ChainDebugger → optional debug prints.
-• utils.banner → Rich ASCII banner.
+• `ids.snake_case` / `new_run_id` → naming helpers
+• `json_schema.generate_json_output_prompt` → builds instruction for LLM to follow schema
+• `debug.ChainDebugger` → optional debug prints
+• `utils.banner` → Rich ASCII banner
+• `utils.events` → pub/sub event system
+• `utils.dag` → DAG traversal and Rich tree building
+• `utils.validate` → chain I/O compatibility validation
+
+Runner (Streaming Execution)
+---------------------------
+Chainette's *Runner* handles millions of items with <500 MB RAM:
+• `Executor.run_iter` yields batches and frees memory
+• `StreamWriter` streams JSONL/Parquet, rolling every N lines
+• Rich Live logger displays an ASCII banner, DAG tree, and per-step progress
+• CLI flags: `--stream-writer`, `--quiet`, `--json-logs`, and `inspect-dag`
+
+Memory efficiency:
+- Chunked execution releases references to processed batches
+- Writer flushes each batch immediately
+- No full dataset loading for flattening operations
+
+DSL & Builder Patterns
+---------------------
+**Fluent DSL**: Pipeline construction using operators:
+```python
+from chainette.dsl import step, apply, branch
+
+pipeline = (
+    step("extract").engine("gpt4") 
+    >> branch("translations", [
+        step("translate_fr").engine("gpt4"),
+        step("translate_es").engine("gpt4")
+    ]).join("translations")
+    >> step("summarize").engine("gpt4")
+)
+```
+
+**Graph Building**: Explicit connection API:
+```python
+from chainette.core.graph import Graph
+
+a = Step("step_a", ...)
+b = Step("step_b", ...)
+a.connect(b)
+graph = Graph(roots=[a])
+```
+
+Result & Error Handling
+----------------------
+**BaseResult**: Structured result carrying value and metadata:
+```python
+@dataclass(slots=True)
+class Result(Generic[T]):
+    value: Optional[T] = None
+    error: Optional[Exception] = None
+    reasoning_content: Optional[str] = None
+    
+    @property
+    def ok(self) -> bool: ...
+```
 
 Testing & Examples
 ------------------
-• tests/ folder pending (few unit tests may exist).
-• examples/ contain sample chains like product attribute extraction, summarization.
+• Comprehensive test suite covering all major features
+• `tests/` folder with unit tests for graph traversal, pooling, rendering
+• Rich example catalog in `examples/` with progressive complexity:
+  - Basic sentiment analysis
+  - Multi-step financial metrics extraction
+  - Translation + summarization with joins
+  - Pure Python transformations
+  - Streaming large datasets
+  - YAML-defined chatbots
+  - Tool use patterns
+  - Domain-specific clinical QA
 
 Dependencies
 ------------
-Mandatory: pydantic>=2, vllm, transformers (tokenizer), datasets, typer, rich, jinja2, torch.
-Python ≥3.9.
+Mandatory: pydantic>=2, transformers (tokenizer), datasets, typer, rich, jinja2, openai
+Optional: vllm (server mode), ollama (client), pyarrow (parquet), anyio (async)
+Python ≥3.9
 
 Coding Conventions for Contributors
 -----------------------------------
-1. Keep code small & readable; avoid heavy abstractions.
-2. Place new primitives in dedicated small modules (follow current structure).
-3. Always type-annotate public APIs.
-4. Use `__all__` for explicit exports.
-5. Maintain Step/Chain contract: `.execute(inputs, histories, writer, debug, batch_size)` returning same length lists (except Apply may expand/contract).
-6. Ensure any GPU/lazy loading resources are explicit & releasable.
-7. Pydantic v2 models: use `.model_dump()` / `.model_validate()`.
-8. Write docstrings; user-facing docs in README, dev docs in code.
+1. Keep code small & readable; avoid heavy abstractions
+2. Place new primitives in dedicated small modules (follow current structure)
+3. Always type-annotate public APIs
+4. Use `__all__` for explicit exports
+5. Maintain Node contract: `.execute(inputs, histories, writer, debug, batch_size)` returning same length lists
+6. Ensure any GPU/lazy loading resources are explicit & releasable
+7. Pydantic v2 models: use `.model_dump()` / `.model_validate()`
+8. Write docstrings; user-facing docs in README, dev docs in code
+9. HTTP-first: prefer stateless clients over in-process model loading
+10. Event-driven: use pub/sub for logging and progress tracking
 
-Extensibility Hot-Spots / TODOs
--------------------------------
-• Engine layer complete: supports OpenAI, vLLM Serve, and Ollama HTTP back-ends.
-• Concurrency: Step batching uses simple slicing; could integrate asyncio or multiprocessing.
-• Streaming Tokens: integrate vLLM streaming into Chain & writer.
-• Merge Branch outputs into main flow (optional join nodes).
-• CLI: add `warmup`, `kill`, progress bars, load YAML engines config.
-• Improve RunWriter chunking, parquet export, HF push.
-• Unit tests coverage.
-• Plugin system for custom prompt builders or dynamic routing.
+Extensibility Hot-Spots / Recent Additions
+------------------------------------------
+• **HTTP Engine Layer**: Complete migration from in-process vLLM to HTTP clients
+• **Engine Broker**: Ref-counted engine management with context managers
+• **vLLM Server Management**: Robust subprocess spawning with health checks and live log streaming
+• **Streaming I/O**: StreamWriter for memory-efficient processing of large datasets
+• **Event System**: Pub/sub architecture for progress tracking and logging
+• **DAG Visualization**: Rich tree rendering with hierarchical structure and engine labels
+• **YAML Support**: Declarative pipeline definition with full schema validation
+• **Join Mechanics**: Branch output merging into parent history for complex workflows
+• **Async Execution**: Optional AsyncExecutor using anyio for concurrent processing
+• **Fluent DSL**: Pipeline construction with `>>` and `|` operators
+• **Progress Enhancement**: Fine-grained progress bars with smooth updates
+
+Security & Production Notes
+---------------------------
+• Use `stdout=DEVNULL, stderr=DEVNULL` only if `debug=False`; else surface logs
+• Use `preexec_fn=os.setsid` on Linux so SIGTERM can kill child tree
+• Poll health with exponential back-off to lighten server load
+• GPU selection via `CUDA_VISIBLE_DEVICES` environment injection
+• Timeout handling with configurable limits per backend
+• Structured error propagation through Result objects
 
 Internal Data Flow Cheat-Sheet
 ------------------------------
-1. User registers engines.
-2. Build Chain with Steps/Apply/Branches.
-3. Chain.run(inputs, output_dir,…)
+1. User registers engines via `register_engine()` (HTTP endpoints)
+2. Build Chain with Steps/Apply/Branches or load from YAML
+3. Chain.run(inputs, output_dir,…) or Chain.run_async()
    └─ writer.init(graph)
-   └─ for node in steps:
-        if Step:
-           — build prompt(s) via jinja2
-           — call engine.generate
-           — parse/validate JSON → pydantic
-           — update histories
-           — writer.write_step
-        elif Apply:
-           — fn on input, update histories.
-        elif Branch/List[Branch]:
-           — for each branch: copy histories & execute internal nodes.
-   └─ release engine(s)
-   └─ writer.finalize() → writes graph.json, datasets, flattened.
+   └─ Executor builds DAG and validates
+   └─ for each batch:
+        └─ EngineBroker.acquire(engine_name) → HTTP client
+        └─ if Step: build prompts → HTTP call → parse/validate JSON
+        └─ if Apply: pure Python function
+        └─ if Branch: copy histories & execute internal nodes
+        └─ update histories & writer.write_step
+        └─ publish progress events
+   └─ EngineBroker.flush(force=True)
+   └─ writer.finalize() → writes graph.json, datasets, flattened
 
-### Runner (streaming execution)
-Chainette's *Runner* handles millions of items with <500 MB RAM:
-• `Executor.run_iter` yields batches and frees memory.
-• `StreamWriter` streams JSONL/Parquet, rolling every N lines.
-• Rich Live logger displays an ASCII banner, DAG tree, and per-step progress.
-CLI flags: `--stream-writer`, `--quiet`, `--json-logs`, and `inspect-dag`.
-
-### Engine Broker
-Lazy spin-up + ref-counted release:
-```python
-with EngineBroker.acquire("gemma_ollama") as eng:
-    eng.generate(prompts)
-```
-Executor calls `EngineBroker.flush(force=True)` at run end.
-
-### DAG UI & Progress Bars (2025)
-
-• Rich `Tree` visualises the execution graph with icons and colours.
-• Flags:
-  – `--no-icons` (ASCII/monochrome)  
-  – `--max-branches N` collapse large parallel wrappers.
-• Live progress per Step: bar + `completed/total` badge, updated after each batch.
-• `RenderOptions` allows programmatic control (icons_on, max_branches).
+Performance Characteristics
+--------------------------
+• **Memory**: <500 MB for millions of items (streaming mode)
+• **Concurrency**: ThreadPoolExecutor for HTTP requests (max 8 concurrent)
+• **Batching**: Configurable batch sizes for optimal throughput
+• **Caching**: Engine clients cached globally, models managed by external servers
+• **Streaming**: Chunked file writing with configurable line limits
+• **Progress**: Real-time updates without performance impact
 
 End-Of-File 

@@ -29,6 +29,16 @@ class Executor:  # noqa: D101
         self.batch_size = batch_size
 
     # ------------------------------------------------------------------ #
+    def _prewarm_engines(self, nodes):  # noqa: D401
+        """Spawn all non-lazy engine processes before execution."""
+        seen = set()
+        for n in nodes:
+            if isinstance(n.ref, Step):
+                cfg = get_engine_config(n.ref.engine_name)
+                if cfg.lazy is False and cfg.name not in seen:
+                    ensure_running(cfg)
+                    seen.add(cfg.name)
+
     def run(
         self,
         inputs: List[BaseModel],
@@ -38,6 +48,8 @@ class Executor:  # noqa: D101
         """Execute *graph* on *inputs*; return final histories."""
         histories: List[Dict[str, Any]] = [{"chain_input": inp, "row_id": idx} for idx, inp in enumerate(inputs)]
         nodes = self.graph.nodes()
+        # Pre-warm persistent engines
+        self._prewarm_engines(nodes)
         active_cfg = None  # track current engine cfg for maybe_stop
         if debug:
             print("EXECUTOR order:", [n.id for n in nodes])
@@ -80,14 +92,6 @@ class Executor:  # noqa: D101
 
                     publish(BatchFinished(step_id=obj.id, batch_no=batch_no, count=len(batch_inp)))
 
-                    # Optional live badge update
-                    try:
-                        from chainette.utils.logging import update_step_badge  # noqa: WPS433
-
-                        update_step_badge(obj.id, processed=(batch_no + 1) * len(batch_inp))
-                    except Exception:
-                        pass
-
                     # Fallback: when parsing fails, Step may return fewer outputs.
                     # In that case, keep original inputs/histories aligned.
                     if outs:
@@ -101,6 +105,11 @@ class Executor:  # noqa: D101
 
                 inputs = new_inputs
                 histories = new_histories
+
+                # Insert flush after obj.execute
+                # Flush idle engines but keep current engine alive; avoid forced
+                # teardown so that same-engine successive steps reuse it.
+                EngineBroker.flush(force=False)
 
             elif isinstance(obj, ApplyNode):
                 inputs, histories = obj.execute(inputs, histories, writer, debug=debug)
@@ -117,8 +126,6 @@ class Executor:  # noqa: D101
 
             else:
                 raise TypeError(f"Unsupported node type: {type(obj).__name__}")
-
-        EngineBroker.flush(force=True)
 
         if active_cfg is not None:
             maybe_stop(active_cfg)
@@ -142,6 +149,8 @@ class Executor:  # noqa: D101
         histories: List[Dict[str, Any]] = [{"chain_input": inp, "row_id": idx} for idx, inp in enumerate(inputs)]
 
         nodes = self.graph.nodes()
+        # Pre-warm persistent engines
+        self._prewarm_engines(nodes)
         active_cfg = None  # track current engine cfg for maybe_stop
         if debug:
             print("EXECUTOR order:", [n.id for n in nodes])
@@ -183,14 +192,6 @@ class Executor:  # noqa: D101
 
                     publish(BatchFinished(step_id=obj.id, batch_no=batch_no, count=len(batch_inp)))
 
-                    # Optional live badge update
-                    try:
-                        from chainette.utils.logging import update_step_badge  # noqa: WPS433
-
-                        update_step_badge(obj.id, processed=(batch_no + 1) * len(batch_inp))
-                    except Exception:
-                        pass
-
                     if outs:
                         new_inputs.extend(outs)
                         new_histories.extend(hist_out)
@@ -212,6 +213,11 @@ class Executor:  # noqa: D101
 
                 inputs = new_inputs
                 histories = new_histories
+
+                # Insert flush after obj.execute
+                # Flush idle engines but keep current engine alive; avoid forced
+                # teardown so that same-engine successive steps reuse it.
+                EngineBroker.flush(force=False)
 
             else:
                 # Fallback to original logic for non-Step

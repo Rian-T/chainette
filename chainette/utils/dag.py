@@ -56,12 +56,14 @@ class RenderOptions:
 # Rich-aware tree builder (import lazily to avoid hard dep at import time)
 # --------------------------------------------------------------------------- #
 
-def build_rich_tree(chain: Chain, opts: RenderOptions | None = None):  # noqa: D401
+def build_rich_tree(chain: Chain, **kwargs):  # noqa: D401
     """Return a *rich.tree.Tree* visualisation of *chain* (side-effect-free)."""
     from rich.tree import Tree  # local import keeps this module lightweight
 
-    if opts is None:
-        opts = RenderOptions()
+    opts = RenderOptions(
+        icons_on=not kwargs.get("no_icons", False),
+        max_branches=kwargs.get("max_branches"),
+    )
 
     tree = Tree("[bold]Execution DAG[/]")
 
