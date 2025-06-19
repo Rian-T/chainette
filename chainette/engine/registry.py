@@ -8,7 +8,10 @@ Currently only supports vLLM engines, but is designed to be easily extended.
 import asyncio  # Add this import
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Sequence, Union
+
+from .process_manager import ensure_running, maybe_stop
+from ..utils.events import publish, EngineStarted, EngineReleased
 
 _Any = Any  # simple alias for forward references without importing heavy libs
 
@@ -62,6 +65,10 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
     endpoint: Optional[str] = None
     api_key: Optional[str] = None
 
+    # Startup / device placement
+    startup_timeout: int = 120  # seconds to wait for health check
+    gpu_ids: Optional[Union[str, Sequence[int]]] = None  # CUDA_VISIBLE_DEVICES
+
     # -------------------------------------------------- #
     # Public helpers
     # -------------------------------------------------- #
@@ -74,29 +81,26 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
                 self._engine = self._create_ollama_engine()
             elif self.backend == "vllm_api":
                 from chainette.engine.http_client import VLLMClient
+                ensure_running(self)
                 self._engine = VLLMClient(self.endpoint, self.model)
             elif self.backend == "openai":
                 from chainette.engine.http_client import OpenAIClient
                 self._engine = OpenAIClient(self.endpoint, self.api_key, self.model)
             elif self.backend == "ollama_api":
                 from chainette.engine.http_client import OllamaHTTPClient
+                ensure_running(self)
                 self._engine = OllamaHTTPClient(self.endpoint, self.model)
             else:
                 raise ValueError(f"Unsupported backend '{self.backend}'.")
 
             # ----- UI notification ------------------------------------------------
-            try:
-                from chainette.utils.logging import console  # noqa: WPS433
+            publish(EngineStarted(engine_name=self.name, backend=self.backend))
 
-                console.print(
-                    f"[green]🚀 Started engine '[bold]{self.name}[/]' ({self.backend})[/]"
-                )
-            except Exception:  # pragma: no cover
-                pass
         return self._engine
 
     def release_engine(self):
         """Release the cached engine instance to free resources."""
+        maybe_stop(self)
         if self._engine is not None:
             engine_to_release = self._engine
             self._engine = None  # Remove reference from this config object.
@@ -110,14 +114,7 @@ class EngineConfig:  # noqa: D101 – self-documenting via fields
             del engine_to_release
 
             # ----- UI notification ------------------------------------------------
-            try:
-                from chainette.utils.logging import console  # noqa: WPS433
-
-                console.print(
-                    f"[red]🗑️ Released engine '[bold]{self.name}[/]' ({self.backend})[/]"
-                )
-            except Exception:
-                pass
+            publish(EngineReleased(engine_name=self.name, backend=self.backend))
         else:
             pass # No active engine instance to release
 

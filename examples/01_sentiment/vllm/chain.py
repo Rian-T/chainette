@@ -30,8 +30,9 @@ class Sentiment(BaseModel):
 register_engine(
     "vllm_default",
     backend="vllm_api",
-    model="mistralai/Mistral-7B-Instruct-v0.2",  # Replace with the model loaded by your vLLM server
+    model="google/gemma-3-4b-it",  # Replace with the model loaded by your vLLM server
     #endpoint="http://localhost:8000/v1",
+    startup_timeout=300,
 )
 
 sentiment_step = Step(
@@ -49,4 +50,4 @@ sentiment_step = Step(
 # Chain
 # --------------------------------------------------------------------------- #
 
-sentiment_chain = Chain(name="Sentiment Demo (vLLM)", steps=[sentiment_step]) 
+sentiment_chain = Chain(name="Sentiment Demo (vLLM)", steps=[sentiment_step])

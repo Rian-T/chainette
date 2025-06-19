@@ -70,6 +70,24 @@ class StepTotalItems(Event):
     total: int
 
 
+@dataclass(slots=True)
+class EngineStarted:
+    engine_name: str
+    backend: str
+
+
+@dataclass(slots=True)
+class EngineReleased:
+    engine_name: str
+    backend: str
+
+
+@dataclass(slots=True)
+class EngineLogReceived:
+    engine_name: str
+    message: str
+
+
 # --------------------------------------------------------------------------- #
 # API helpers
 # --------------------------------------------------------------------------- #

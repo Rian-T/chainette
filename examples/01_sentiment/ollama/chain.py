@@ -25,15 +25,21 @@ class Sentiment(BaseModel):
 # --------------------------------------------------------------------------- #
 
 register_engine(
-    "ollama_default",
+    "ollama_1b",
     backend="ollama_api",
-    model="phi3:mini",  # Replace with your preferred Ollama model tag
+    model="gemma3:1b",
 )
 
-sentiment_step = Step(
-    id="sentiment",
-    name="Sentiment Classifier",
-    engine_name="ollama_default",
+register_engine(
+    "ollama_4b",
+    backend="ollama_api",
+    model="gemma3:4b",
+)
+
+sentiment_step_1b = Step(
+    id="sentiment_1b",
+    name="Sentiment (1B)",
+    engine_name="ollama_1b",
     input_model=Review,
     output_model=Sentiment,
     sampling=SamplingParams(temperature=0.0),
@@ -41,8 +47,23 @@ sentiment_step = Step(
     user_prompt="{{chain_input.review}}",
 )
 
+sentiment_step_4b = Step(
+    id="sentiment_4b",
+    name="Sentiment (4B)",
+    engine_name="ollama_4b",
+    input_model=Review,
+    output_model=Sentiment,
+    sampling=SamplingParams(temperature=0.0),
+    system_prompt="Classify the sentiment of the given customer review as positive, neutral, or negative.",
+    user_prompt="{{chain_input.review}}",
+)
+
+
 # --------------------------------------------------------------------------- #
 # Chain
 # --------------------------------------------------------------------------- #
 
-sentiment_chain = Chain(name="Sentiment Demo (Ollama)", steps=[sentiment_step]) 
+sentiment_chain = Chain(
+    name="Sentiment Demo (Ollama Multi-Model)",
+    steps=[sentiment_step_1b, sentiment_step_4b],
+) 

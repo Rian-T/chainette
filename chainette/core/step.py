@@ -98,22 +98,7 @@ class Step(Node):
         # Internal counter for progress tracking across batches
         self._completed_items: int = 0
 
-        json_schema = self.output_model.model_json_schema()
-        # Guided decoding not supported by the OpenAI backend (it uses a different
-        # structured-output mechanism). Attach guided params only for back-ends
-        # that explicitly advertise support (vllm, ollama, etc.).
-        try:
-            cfg = get_engine_config(self.engine_name)
-        except KeyError:
-            cfg = None  # engine not registered yet; assume supports guided params
-
-        if cfg is None or getattr(cfg, "backend", "vllm") not in ("openai",):
-            guided_params = GuidedDecodingParams(json=json_schema)
-            self.sampling.guided_decoding = guided_params
-        else:
-            # Ensure we don't accidentally send guided decoding hints.
-            if hasattr(self.sampling, "guided_decoding"):
-                self.sampling.guided_decoding = None
+        # No direct JSON schema here – downstream HTTP clients will derive it from *output_model*.
 
     def execute(
         self,
@@ -143,7 +128,12 @@ class Step(Node):
         from chainette.engine.broker import EngineBroker
 
         with EngineBroker.acquire(self.engine_name) as eng:
-            raw_outputs = eng.generate(prompts=prompts, sampling_params=self.sampling, step_id=self.id)
+            raw_outputs = eng.generate(
+                prompts=prompts,
+                output_model=self.output_model,
+                sampling_params=self.sampling,
+                step_id=self.id,
+            )
 
         parsed_outputs: List[BaseModel] = []
         parsed_records_for_writer: List[Any] = []

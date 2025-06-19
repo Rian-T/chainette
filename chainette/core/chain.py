@@ -44,7 +44,6 @@ class Chain:
         generate_flattened_output: bool = True,
         max_lines_per_file: int = 1000,
         debug: bool = False,
-        show_ui: bool = True,
     ):
         """Execute the chain and write results.
 
@@ -87,17 +86,6 @@ class Chain:
             raise ValueError("Chain has no executable nodes.")
 
         graph = Graph(roots=graph_nodes[:1])  # first root; downstream links set above
-
-        if show_ui:
-            try:
-                from chainette.utils.banner import ChainetteBanner
-                from chainette.utils.logging import show_dag_tree
-
-                ChainetteBanner().display()  # type: ignore[call-arg]
-                show_dag_tree(self)
-            except Exception:  # noqa: BLE001
-                # UI is optional – ignore failures (e.g., non-TTY env)
-                pass
 
         executor = Executor(graph, batch_size=self.batch_size)
 
