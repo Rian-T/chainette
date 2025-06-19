@@ -10,16 +10,17 @@ where *LLMOutput* only needs to expose ``outputs[0].text`` (optionally ``reasoni
 Keeping these wrappers tiny allows painless addition of new back-ends.
 """
 
-from typing import List, Any, Optional, Sequence
+from typing import List, Any, Optional, Sequence, Type
 from dataclasses import dataclass
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pydantic import BaseModel
+import openai
 
-# Local fallback if the OpenAI package is missing – we raise at runtime.
 try:
-    import openai  # type: ignore
-except ModuleNotFoundError:  # pragma: no cover – handled later
-    openai = None  # type: ignore
+    import ollama
+except ModuleNotFoundError:
+    ollama = None
 
 __all__ = [
     "BaseHTTPClient",
@@ -29,164 +30,118 @@ __all__ = [
 ]
 
 
-class _SimpleCompletion:  # noqa: D401 – internal struct
+class _SimpleCompletion:
     """Minimal completion wrapper compatible with parse_llm_json."""
 
     def __init__(self, text: str):
         self.text = text
-        # Keep interface parity with vLLM
         self.reasoning_content: Optional[str] = None
 
 
-class _RequestOutput:  # noqa: D401 – mimic vllm.RequestOutput
+class _RequestOutput:
+    """Mimic vllm.RequestOutput."""
+    
     def __init__(self, text: str):
         self.outputs = [_SimpleCompletion(text)]
 
 
 @dataclass(slots=True)
-class BaseHTTPClient:  # noqa: D101 – base contract
+class BaseHTTPClient:
+    """Base contract for HTTP clients."""
+    
     endpoint: str | None
     api_key: str | None
     model: str
 
-    # ------------------------------------------------------------------ #
-    def _build_headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
-
-    # ------------------------------------------------------------------ #
-    def generate(self, *, prompts: List[str], sampling_params: Any | None = None, step_id: str | None = None):  # noqa: D401
-        """Shared generate that delegates to :meth:`_send_chat` per prompt."""
-        out: List[_RequestOutput] = []
-        temperature: float | None = None
-        if sampling_params is not None and hasattr(sampling_params, "temperature"):
-            temperature = sampling_params.temperature  # type: ignore[attr-defined]
-
-        # Build message payloads first to preserve order
+    def generate(
+        self,
+        *,
+        prompts: List[str],
+        output_model: Type[BaseModel],
+        sampling_params: Any | None = None,
+        step_id: str | None = None,
+    ):
+        """Generate outputs for *prompts* enforcing guided JSON schema."""
+        temperature = getattr(sampling_params, "temperature", None) if sampling_params else None
+        
         msgs: List[Sequence[dict]] = [p if isinstance(p, list) else [{"role": "user", "content": p}] for p in prompts]
-
-        # Fire requests concurrently – small thread pool is enough because network-bound
-        results: List[Optional[str]] = [None] * len(msgs)
+        results: List[str] = [None] * len(msgs)
 
         def _run(idx: int, m: Sequence[dict]):
-            txt = self._send_chat(messages=list(m), temperature=temperature)
-            if step_id is not None:
-                try:
-                    from chainette.utils.logging import update_step_badge  # noqa: WPS433
-
-                    update_step_badge(step_id, advance=1)
-                except Exception:
-                    pass
+            txt = self._send_chat(messages=list(m), temperature=temperature, output_model=output_model)
             return idx, txt
 
         with ThreadPoolExecutor(max_workers=min(8, len(msgs))) as pool:
             futures = [pool.submit(_run, i, m) for i, m in enumerate(msgs)]
             for fut in as_completed(futures):
-                try:
-                    idx, txt = fut.result()
-                except Exception as exc:  # noqa: BLE001
-                    # Safeguard: timeout or network issue – skip this prompt
-                    print(f"[WARN] Engine request failed or timed out: {exc}. Skipping item.")
-                    continue  # leave None in results
+                idx, txt = fut.result()
                 results[idx] = txt
 
-        out = [_RequestOutput(txt or "") for txt in results]
-        return out
+        return [_RequestOutput(txt) for txt in results]
 
-    # ------------------------------------------------------------------ #
-    def _send_chat(self, *, messages: List[dict], temperature: float | None):  # noqa: D401
+    def _send_chat(self, *, messages: List[dict], temperature: float | None, output_model: Type[BaseModel]):
         """Backend-specific implementation – must return response text."""
         raise NotImplementedError
 
 
-# --------------------------------------------------------------------------- #
-# OpenAI – official Python SDK (sync)                                          #
-# --------------------------------------------------------------------------- #
-
-
-class OpenAIClient(BaseHTTPClient):  # noqa: D101
+class OpenAIClient(BaseHTTPClient):
+    """OpenAI API client."""
+    
     def __init__(self, endpoint: str | None, api_key: str | None, model: str):
-        if openai is None:
-            raise ModuleNotFoundError(
-                "The 'openai' package is required for backend 'openai'.\n"
-                "Install with: pip install openai"
-            )
         super().__init__(endpoint, api_key or os.getenv("OPENAI_API_KEY"), model)
-        self._client = openai.OpenAI(base_url=self.endpoint, api_key=self.api_key)  # type: ignore[arg-type]
+        self._client = openai.OpenAI(base_url=self.endpoint, api_key=self.api_key)
 
-    def _send_chat(self, *, messages: List[dict], temperature: float | None):  # noqa: D401
+    def _send_chat(self, *, messages: List[dict], temperature: float | None, output_model: Type[BaseModel]):
+        resp = self._client.responses.parse(
+            model=self.model,
+            input=messages,
+            temperature=temperature,
+            text_format=output_model,
+            timeout=120,
+        )
+        return resp.output_parsed
+
+
+class VLLMClient(BaseHTTPClient):
+    """Client for vLLM's OpenAI-compatible HTTP server using OpenAI SDK."""
+
+    def __init__(self, endpoint: str | None, model: str):
+        super().__init__(endpoint or "http://localhost:8000/v1", None, model)
+        self._client = openai.OpenAI(base_url=self.endpoint, api_key="")
+
+    def _send_chat(self, *, messages: List[dict], temperature: float | None, output_model: Type[BaseModel]):
+        json_schema = output_model.model_json_schema()
         resp = self._client.chat.completions.create(
             model=self.model,
             messages=messages,
             temperature=temperature,
-            response_format={"type": "json_object"},
-            timeout=120,  # seconds – abort long-running requests
+            extra_body={"guided_json": json_schema},
+            timeout=120,
         )
-        return resp.choices[0].message.content or ""
+        return resp.choices[0].message.content
 
 
-# --------------------------------------------------------------------------- #
-# vLLM Serve – OpenAI compatible endpoint                                    #
-# --------------------------------------------------------------------------- #
-
-
-class VLLMClient(BaseHTTPClient):  # noqa: D101
-    """Client for vLLM's OpenAI-compatible HTTP server."""
+class OllamaHTTPClient(BaseHTTPClient):
+    """Client using Ollama Python package."""
 
     def __init__(self, endpoint: str | None, model: str):
-        super().__init__(endpoint or "http://localhost:8000/v1", None, model)
-        import httpx
+        if ollama is None:
+            raise ModuleNotFoundError(
+                "The 'ollama' package is required for backend 'ollama_api'.\n"
+                "Install with: pip install ollama"
+            )
+        super().__init__(endpoint, None, model)
+        self._client = ollama.Client(host=self.endpoint)
 
-        self._client = httpx.Client(base_url=self.endpoint, timeout=60)
-
-    def _send_chat(self, *, messages: List[dict], temperature: float | None):  # noqa: D401
-        import httpx
-
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "response_format": {"type": "json_object"},
-        }
-        if temperature is not None:
-            payload["temperature"] = temperature
-
-        resp: httpx.Response = self._client.post("/chat/completions", json=payload)
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"]
-
-
-# --------------------------------------------------------------------------- #
-# Ollama REST API client                                                      #
-# --------------------------------------------------------------------------- #
-
-
-class OllamaHTTPClient(BaseHTTPClient):  # noqa: D101
-    """Client hitting Ollama's `/api/chat` endpoint.
-
-    Requires Ollama daemon running locally (default `http://localhost:11434`).
-    """
-
-    def __init__(self, endpoint: str | None, model: str):
-        super().__init__(endpoint or "http://localhost:11434", None, model)
-        import httpx
-
-        self._client = httpx.Client(base_url=self.endpoint, timeout=60)
-
-    def _send_chat(self, *, messages: List[dict], temperature: float | None):  # noqa: D401
-        import httpx
-
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "stream": False,
-        }
-        if temperature is not None:
-            payload["options"] = {"temperature": temperature}
-
-        resp: httpx.Response = self._client.post("/api/chat", json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-        return (
-            data.get("message", {}).get("content")
-            if isinstance(data, dict)
-            else data["message"]["content"]
-        ) 
+    def _send_chat(self, *, messages: List[dict], temperature: float | None, output_model: Type[BaseModel]):
+        json_schema = output_model.model_json_schema()
+        resp = self._client.chat(
+            model=self.model,
+            messages=messages,
+            stream=False,
+            format="json",
+            options={"temperature": temperature},
+        )
+        # The official ollama client returns a dict, not an object.
+        content = resp.get("message", {}).get("content", "")
+        return content 
