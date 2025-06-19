@@ -15,6 +15,8 @@ from pydantic import BaseModel
 
 from chainette import Chain, Step, ApplyNode, Branch, Node # Assuming __all__ is well-defined
 from chainette.engine.registry import _REGISTRY as ENGINE_REGISTRY, EngineConfig, get_engine_config # Accessing internal for simplicity
+from chainette.utils import logging as chainette_logging
+from chainette.utils.logging import live_logger
 
 app = typer.Typer(
     name="chainette",
@@ -194,10 +196,8 @@ def run(
     output_dir: Path = typer.Argument(..., help="Directory to save the output datasets.", file_okay=False, dir_okay=True, writable=True, resolve_path=True),
     generate_flattened: bool = typer.Option(True, "--flattened/--no-flattened", help="Generate a single flattened output file."),
     max_lines_per_file: int = typer.Option(1000, help="Maximum lines per output data file."),
-    stream_writer: bool = typer.Option(False, "--stream-writer/--no-stream-writer", help="Use the new incremental StreamWriter."),
     no_icons: bool = typer.Option(False, "--no-icons", help="Disable emoji/icons in DAG tree."),
     max_branches: int = typer.Option(None, "--max-branches", help="Limit number of branches shown under parallel wrapper."),
-    quiet: bool = typer.Option(False, "--quiet", help="Disable live progress/output."),
     json_logs: bool = typer.Option(False, "--json-logs", help="Emit JSON event logs instead of Rich UI."),
 ):
     """Run a chain with inputs from a JSONL file and save results."""
@@ -276,65 +276,36 @@ def run(
         return
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Always show banner and DAG before execution (quiet mode removed)
+    from chainette.utils.banner import ChainetteBanner
+    ChainetteBanner(console=console).display()
+    console.print(
+        f"[bold]Chain:[/] {chain_obj.name} • [bold]Inputs:[/] {len(inputs_data)} • "
+        f"[bold]Output Dir:[/] {output_dir}",
+    )
+    console.print("")
+    chainette_logging.show_dag_tree(chain_obj, no_icons=no_icons, max_branches=max_branches)
 
     try:
-        from chainette.utils.banner import ChainetteBanner  # noqa: WPS433
-        ChainetteBanner(console=console).display()
-
-        console.print(
-            f"[bold]Chain:[/] {chain_obj.name} • [bold]Inputs:[/] {len(inputs_data)} • "
-            f"[bold]Output Dir:[/] {output_dir}",
-        )
-        console.print("")  # spacing
-
-        # Prepare writer (legacy or streaming)
-        if stream_writer:
-            from chainette.io.stream_writer import StreamWriter  # noqa: WPS433
-
-            writer = StreamWriter(output_dir, max_lines_per_file=max_lines_per_file, fmt="jsonl")
-        else:
-            from chainette.io.writer import RunWriter
-
-            writer = RunWriter(output_dir, max_lines_per_file=max_lines_per_file, fmt="jsonl")
-
         if not json_logs:
-            from chainette.utils.logging import show_dag_tree  # noqa: WPS433
-            from chainette.utils.dag import RenderOptions
+            live_logger.start()
 
-            opts = RenderOptions(icons_on=(not no_icons), max_branches=max_branches)
-            show_dag_tree(chain_obj, opts=opts)
+        # StreamWriter is now the default and only writer mode.
+        from chainette.io.stream_writer import StreamWriter
+        writer = StreamWriter(output_dir, max_lines_per_file=max_lines_per_file, fmt="jsonl")
 
-        if json_logs:
-            # Simple JSON print of events
-            from chainette.utils.events import subscribe, BatchStarted, BatchFinished
-            import json as _json
-
-            @subscribe(BatchStarted)
-            def _log_bs(e):
-                print(_json.dumps({"event": "batch_started", **e.__dict__}))
-
-            @subscribe(BatchFinished)
-            def _log_bf(e):
-                print(_json.dumps({"event": "batch_finished", **e.__dict__}))
-
-        # Call chain run without internal UI to avoid duplicate banner/tree
         chain_obj.run(
-            inputs=inputs_data,
+            inputs_data,
             writer=writer,
-            output_dir=output_dir,
-            fmt="jsonl",  # Currently hardcoded, could be an option
             generate_flattened_output=generate_flattened,
-            max_lines_per_file=max_lines_per_file,
-            show_ui=False,
         )
+    finally:
+        if not json_logs:
+            live_logger.stop()
 
-        console.print("\n[bold green]Chain execution finished successfully![/]")
-        console.print(f"Results written to {output_dir}")
-    except Exception as e:
-        console.print(f"\n[bold red]Error during chain execution: {e}[/]")
-        import traceback
-        console.print(f"\n[dim]{traceback.format_exc()}[/dim]")
-        raise typer.Exit(code=1)
+    console.print(f"\n[bold green]Chain execution finished successfully![/]")
+    console.print(f"Results written to {output_dir}")
 
 # --------------------------------------------------------------------------- #
 # YAML runner
