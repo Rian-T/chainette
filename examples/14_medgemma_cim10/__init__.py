@@ -1,0 +1,1 @@
+# MedGemma CIM-10 Synthetic Data Generation Example
