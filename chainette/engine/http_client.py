@@ -107,7 +107,7 @@ class VLLMClient(BaseHTTPClient):
 
     def __init__(self, endpoint: str | None, model: str):
         super().__init__(endpoint or "http://localhost:8000/v1", None, model)
-        self._client = openai.OpenAI(base_url=self.endpoint, api_key="")
+        self._client = openai.OpenAI(base_url=self.endpoint, api_key="dummy-key")
 
     def _send_chat(self, *, messages: List[dict], temperature: float | None, output_model: Type[BaseModel]):
         json_schema = output_model.model_json_schema()

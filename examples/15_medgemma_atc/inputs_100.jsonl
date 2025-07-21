@@ -1,0 +1,100 @@
+{"code": "L01BC09", "label_fr": "floxuridine", "label_en": "floxuridine", "parent_code": "L01BC", "level": "5"}
+{"code": "N06AA18", "label_fr": "dimétacrine", "label_en": "dimetacrine", "parent_code": "N06AA", "level": "5"}
+{"code": "C03AA03", "label_fr": "hydrochlorothiazide", "label_en": "hydrochlorothiazide", "parent_code": "C03AA", "level": "5"}
+{"code": "A10AC", "label_fr": "insulines et analogues d'action intermédiaire par voie injectable", "label_en": "Insulins and analogues for injection, intermediate-acting", "parent_code": "A10A", "level": "4"}
+{"code": "S01EA04", "label_fr": "clonidine", "label_en": "clonidine", "parent_code": "S01EA", "level": "5"}
+{"code": "N05BA13", "label_fr": "halazépam", "label_en": "halazepam", "parent_code": "N05BA", "level": "5"}
+{"code": "M01AC56", "label_fr": "méloxicam en association", "label_en": "meloxicam, combinations", "parent_code": "M01AC", "level": "5"}
+{"code": "A01AB11", "label_fr": "divers (anti-infectieux et antiseptiques pour traitement oral local)", "label_en": "various", "parent_code": "A01AB", "level": "5"}
+{"code": "B05BA01", "label_fr": "acides aminés", "label_en": "amino acids", "parent_code": "B05BA", "level": "5"}
+{"code": "M01AX23", "label_fr": "ténidap", "label_en": "tenidap", "parent_code": "M01AX", "level": "5"}
+{"code": "D01AC04", "label_fr": "chlormidazole", "label_en": "chlormidazole", "parent_code": "D01AC", "level": "5"}
+{"code": "C03AA04", "label_fr": "chlorothiazide", "label_en": "chlorothiazide", "parent_code": "C03AA", "level": "5"}
+{"code": "C04AC07", "label_fr": "ciclonicate", "label_en": "ciclonicate", "parent_code": "C04AC", "level": "5"}
+{"code": "D09A", "label_fr": "pansements médicamenteux", "label_en": "MEDICATED DRESSINGS", "parent_code": "D09", "level": "3"}
+{"code": "N06AA17", "label_fr": "amoxapine", "label_en": "amoxapine", "parent_code": "N06AA", "level": "5"}
+{"code": "H01AX", "label_fr": "autres hormones de l'antéhypophyse et analogues", "label_en": "Other anterior pituitary lobe hormones and analogues", "parent_code": "H01A", "level": "4"}
+{"code": "H01C", "label_fr": "hormones hypothalamiques", "label_en": "HYPOTHALAMIC HORMONES", "parent_code": "H01", "level": "3"}
+{"code": "A10AD", "label_fr": "insulines et analogues d'action intermédiaire ou lente et à début d'action rapide par voie injectable", "label_en": "Insulins and analogues for injection, intermediate- or long-acting combined with fast-acting", "parent_code": "A10A", "level": "4"}
+{"code": "J07BJ51", "label_fr": "rubéole en association aux oreillons, virus vivants atténués", "label_en": "rubella, combinations with mumps, live attenuated", "parent_code": "J07BJ", "level": "5"}
+{"code": "G03AC10", "label_fr": "drospirénone", "label_en": "drospirenone", "parent_code": "G03AC", "level": "5"}
+{"code": "L01BC08", "label_fr": "décitabine", "label_en": "decitabine", "parent_code": "L01BC", "level": "5"}
+{"code": "C03BC01", "label_fr": "mersalyl", "label_en": "mersalyl", "parent_code": "C03BC", "level": "5"}
+{"code": "A01AB10", "label_fr": "natamycine", "label_en": "natamycin", "parent_code": "A01AB", "level": "5"}
+{"code": "S01EA03", "label_fr": "apraclonidine", "label_en": "apraclonidine", "parent_code": "S01EA", "level": "5"}
+{"code": "M01AX24", "label_fr": "oxacéprol", "label_en": "oxaceprol", "parent_code": "M01AX", "level": "5"}
+{"code": "N05BA12", "label_fr": "alprazolam", "label_en": "alprazolam", "parent_code": "N05BA", "level": "5"}
+{"code": "J02AB01", "label_fr": "miconazole", "label_en": "miconazole", "parent_code": "J02AB", "level": "5"}
+{"code": "D01AC05", "label_fr": "isoconazole", "label_en": "isoconazole", "parent_code": "D01AC", "level": "5"}
+{"code": "C03AA01", "label_fr": "bendrofluméthiazide", "label_en": "bendroflumethiazide", "parent_code": "C03AA", "level": "5"}
+{"code": "V09BA03", "label_fr": "pyrophosphate-technétium (99mTc) ", "label_en": "technetium (99mTc) pyrophosphate", "parent_code": "V09BA", "level": "5"}
+{"code": "C02BA01", "label_fr": "trimétaphan", "label_en": "trimetaphan", "parent_code": "C02BA", "level": "5"}
+{"code": "V08CA03", "label_fr": "gadodiamide", "label_en": "gadodiamide", "parent_code": "V08CA", "level": "5"}
+{"code": "L01BC07", "label_fr": "azacitidine", "label_en": "azacitidine", "parent_code": "L01BC", "level": "5"}
+{"code": "N05BA11", "label_fr": "prazépam", "label_en": "prazepam", "parent_code": "N05BA", "level": "5"}
+{"code": "L01AA08", "label_fr": "prednimustine", "label_en": "prednimustine", "parent_code": "L01AA", "level": "5"}
+{"code": "V08CA02", "label_fr": "acide gadotérique", "label_en": "gadoteric acid", "parent_code": "V08CA", "level": "5"}
+{"code": "A09AB", "label_fr": "préparations acides", "label_en": "Acid preparations", "parent_code": "A09A", "level": "4"}
+{"code": "A01AB13", "label_fr": "tétracycline", "label_en": "tetracycline", "parent_code": "A01AB", "level": "5"}
+{"code": "D01AC02", "label_fr": "miconazole", "label_en": "miconazole", "parent_code": "D01AC", "level": "5"}
+{"code": "B06AA07", "label_fr": "trypsine", "label_en": "trypsin", "parent_code": "B06AA", "level": "5"}
+{"code": "M01AX21", "label_fr": "diacéréine", "label_en": "diacerein", "parent_code": "M01AX", "level": "5"}
+{"code": "N06AA19", "label_fr": "amineptine", "label_en": "amineptine", "parent_code": "N06AA", "level": "5"}
+{"code": "C03AA02", "label_fr": "hydrofluméthiazide", "label_en": "hydroflumethiazide", "parent_code": "C03AA", "level": "5"}
+{"code": "V09BA04", "label_fr": "butédronate-technétium (99mTc) ", "label_en": "technetium (99mTc) butedronic acid", "parent_code": "V09BA", "level": "5"}
+{"code": "A10AB", "label_fr": "insulines et analogues d'action rapide par voie injectable", "label_en": "Insulins and analogues for injection, fast-acting", "parent_code": "A10A", "level": "4"}
+{"code": "L01BC06", "label_fr": "capécitabine", "label_en": "capecitabine", "parent_code": "L01BC", "level": "5"}
+{"code": "L01AA09", "label_fr": "bendamustine", "label_en": "bendamustine", "parent_code": "L01AA", "level": "5"}
+{"code": "S01EA05", "label_fr": "brimonidine", "label_en": "brimonidine", "parent_code": "S01EA", "level": "5"}
+{"code": "N05BA10", "label_fr": "kétazolam", "label_en": "ketazolam", "parent_code": "N05BA", "level": "5"}
+{"code": "V08CA01", "label_fr": "acide gadopentétique", "label_en": "gadopentetic acid", "parent_code": "V08CA", "level": "5"}
+{"code": "A09AC", "label_fr": "enzymes et préparations acides en association", "label_en": "Enzyme and acid preparations, combinations", "parent_code": "A09A", "level": "4"}
+{"code": "A01AB12", "label_fr": "hexétidine", "label_en": "hexetidine", "parent_code": "A01AB", "level": "5"}
+{"code": "D01AC03", "label_fr": "éconazole", "label_en": "econazole", "parent_code": "D01AC", "level": "5"}
+{"code": "L01CE04", "label_fr": "bélotécan", "label_en": "belotecan", "parent_code": "L01CE", "level": "5"}
+{"code": "M01AX22", "label_fr": "morniflumate", "label_en": "morniflumate", "parent_code": "M01AX", "level": "5"}
+{"code": "D01AC08", "label_fr": "kétoconazole", "label_en": "ketoconazole", "parent_code": "D01AC", "level": "5"}
+{"code": "A16AX30", "label_fr": "benzoate de sodium et phénylacétate de sodium", "label_en": "sodium benzoate and sodium phenylacetate", "parent_code": "A16AX", "level": "5"}
+{"code": "C02LG73", "label_fr": "picodralazine et diurétiques en association avec des psycholeptiques", "label_en": "picodralazine and diuretics, combinations with psycholeptics", "parent_code": "C02LG", "level": "5"}
+{"code": "S01AD06", "label_fr": "vidarabine", "label_en": "vidarabine", "parent_code": "S01AD", "level": "5"}
+{"code": "N06AA14", "label_fr": "mélitracène", "label_en": "melitracen", "parent_code": "N06AA", "level": "5"}
+{"code": "V09BA01", "label_fr": "oxidronate-technétium (99mTc) ", "label_en": "technetium (99mTc) oxidronic acid", "parent_code": "V09BA", "level": "5"}
+{"code": "C02CC01", "label_fr": "bétanidine", "label_en": "betanidine", "parent_code": "C02CC", "level": "5"}
+{"code": "A11DB", "label_fr": "vitamine B1 en association à la vitamine B6 et/ou à la vitamine B12", "label_en": "Vitamin B1 in combination with vitamin B6 and/or vitamin B12", "parent_code": "A11D", "level": "4"}
+{"code": "V08CA05", "label_fr": "mangafodipir", "label_en": "mangafodipir", "parent_code": "V08CA", "level": "5"}
+{"code": "A11DA", "label_fr": "vitamine B1 non associée", "label_en": "Vitamin B1, plain", "parent_code": "A11D", "level": "4"}
+{"code": "R05DA06", "label_fr": "norméthadone", "label_en": "normethadone", "parent_code": "R05DA", "level": "5"}
+{"code": "N02BG", "label_fr": "autres analgésiques et antipyrétiques", "label_en": "Other analgesics and antipyretics", "parent_code": "N02B", "level": "4"}
+{"code": "C04AC02", "label_fr": "alcool nicotinique (pyridylcarbinol)", "label_en": "nicotinyl alcohol (pyridylcarbinol)", "parent_code": "C04AC", "level": "5"}
+{"code": "D01AC09", "label_fr": "sulconazole", "label_en": "sulconazole", "parent_code": "D01AC", "level": "5"}
+{"code": "J02AX04", "label_fr": "caspofungine", "label_en": "caspofungin", "parent_code": "J02AX", "level": "5"}
+{"code": "S01AD07", "label_fr": "famciclovir", "label_en": "famciclovir", "parent_code": "S01AD", "level": "5"}
+{"code": "V09BA02", "label_fr": "médronate-technétium (99mTc) ", "label_en": "technetium (99mTc) medronic acid", "parent_code": "V09BA", "level": "5"}
+{"code": "N06AA13", "label_fr": "iprindole", "label_en": "iprindole", "parent_code": "N06AA", "level": "5"}
+{"code": "V08CA04", "label_fr": "gadotéridol", "label_en": "gadoteridol", "parent_code": "V08CA", "level": "5"}
+{"code": "P03AA01", "label_fr": "dixanthogène", "label_en": "dixanthogen", "parent_code": "P03AA", "level": "5"}
+{"code": "A09AA", "label_fr": "préparations enzymatiques", "label_en": "Enzyme preparations", "parent_code": "A09A", "level": "4"}
+{"code": "N02BF", "label_fr": "gabapentinoïdes", "label_en": "Gabapentinoids", "parent_code": "N02B", "level": "4"}
+{"code": "B05BA04", "label_fr": "hydrolysats de protéines", "label_en": "protein hydrolysates", "parent_code": "B05BA", "level": "5"}
+{"code": "S01AD08", "label_fr": "fomivirsen", "label_en": "fomivirsen", "parent_code": "S01AD", "level": "5"}
+{"code": "A12CC10", "label_fr": "oxyde de magnésium", "label_en": "magnesium oxide", "parent_code": "A12CC", "level": "5"}
+{"code": "R05DA07", "label_fr": "noscapine", "label_en": "noscapine", "parent_code": "R05DA", "level": "5"}
+{"code": "C04AC03", "label_fr": "nicotinate d'inositol", "label_en": "inositol nicotinate", "parent_code": "C04AC", "level": "5"}
+{"code": "J02AB02", "label_fr": "kétoconazole", "label_en": "ketoconazole", "parent_code": "J02AB", "level": "5"}
+{"code": "S01KX01", "label_fr": "chymotrypsine", "label_en": "chymotrypsin", "parent_code": "S01KX", "level": "5"}
+{"code": "N06AA16", "label_fr": "dosulépine", "label_en": "dosulepin", "parent_code": "N06AA", "level": "5"}
+{"code": "V08CA07", "label_fr": "citrate d'ammonium ferrique", "label_en": "ferric ammonium citrate", "parent_code": "V08CA", "level": "5"}
+{"code": "C02CC03", "label_fr": "guanoxan", "label_en": "guanoxan", "parent_code": "C02CC", "level": "5"}
+{"code": "H01B", "label_fr": "hormones de la posthypophyse", "label_en": "POSTERIOR PITUITARY LOBE HORMONES", "parent_code": "H01", "level": "3"}
+{"code": "V09HB02", "label_fr": "cellules marquées au tropolonate d’indium (111In)", "label_en": "indium (111In) tropolonate labelled cells", "parent_code": "V09HB", "level": "5"}
+{"code": "J02AX01", "label_fr": "flucytosine", "label_en": "flucytosine", "parent_code": "J02AX", "level": "5"}
+{"code": "M01AX25", "label_fr": "sulfate de chondroïtine", "label_en": "chondroitin sulfate", "parent_code": "M01AX", "level": "5"}
+{"code": "S01EA02", "label_fr": "dipivéfrine", "label_en": "dipivefrine", "parent_code": "S01EA", "level": "5"}
+{"code": "V09HX01", "label_fr": "citrate de gallium (67Ga) ", "label_en": "gallium (67Ga) citrate", "parent_code": "V09HX", "level": "5"}
+{"code": "N02BE", "label_fr": "anilides", "label_en": "Anilides", "parent_code": "N02B", "level": "4"}
+{"code": "B05BA03", "label_fr": "glucides", "label_en": "carbohydrates", "parent_code": "B05BA", "level": "5"}
+{"code": "S01AD09", "label_fr": "ganciclovir", "label_en": "ganciclovir", "parent_code": "S01AD", "level": "5"}
+{"code": "D01AC06", "label_fr": "tiabendazole", "label_en": "tiabendazole", "parent_code": "D01AC", "level": "5"}
+{"code": "R05DA08", "label_fr": "pholcodine", "label_en": "pholcodine", "parent_code": "R05DA", "level": "5"}
+{"code": "S01KX02", "label_fr": "bleu tryptan", "label_en": "trypan blue", "parent_code": "S01KX", "level": "5"}
+{"code": "C08CA", "label_fr": "dérivés de la dihydropyridine", "label_en": "Dihydropyridine derivatives", "parent_code": "C08C", "level": "4"}

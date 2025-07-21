@@ -22,14 +22,11 @@ class SyntheticTextbook(BaseModel):
     
     titre: str = Field(description="Titre éducatif français pour la condition médicale")
     contenu: str = Field(
-        description="Explication complète de style manuel universitaire (plusieurs paragraphes) "
-        "couvrant définition, physiopathologie, présentation clinique, diagnostic et traitement"
+        description="Explication de style manuel universitaire (1-2 paragraphes) "
+        "couvrant définition et présentation clinique"
     )
     points_cles: List[str] = Field(
-        description="3-5 points d'apprentissage clés résumant la condition"
-    )
-    contexte_clinique: str = Field(
-        description="Scénarios cliniques réels et applications pratiques"
+        description="3 points d'apprentissage clés résumant la condition"
     )
 
 
@@ -112,7 +109,6 @@ Soyez critique mais constructif. Proposez des améliorations spécifiques basée
 Titre : {{synthetic_textbook.titre}}
 Contenu : {{synthetic_textbook.contenu}}
 Points clés : {% for point in synthetic_textbook.points_cles %}• {{point}}{% endfor %}
-Contexte clinique : {{synthetic_textbook.contexte_clinique}}
 
 Identifiez toute erreur factuelle et proposez des améliorations."""
 )
@@ -139,22 +135,22 @@ Erreurs identifiées : {% for erreur in critic.erreurs_factuelles %}• {{erreur
 Suggestions : {% for suggestion in critic.suggestions_amelioration %}• {{suggestion}}{% endfor %}
 Évaluation : {{critic.evaluation_qualite}}
 
-Produisez un texte médical académique complet et corrigé, prêt pour le pré-entraînement. Incluez titre, contenu détaillé, points clés et contexte clinique dans un seul texte fluide et cohérent."""
+Produisez un texte médical académique complet et corrigé, prêt pour le pré-entraînement. Incluez titre, contenu détaillé et points clés dans un seul texte fluide et cohérent."""
 )
 
 
 # Register MedGemma-27B engine for medical text generation
 register_engine(
     name="medgemma",
-    model="google/medgemma-27b-text-it",  # Using the correct 27B instruction-tuned model
+    model="google/medgemma-4b-it",  # Using the correct 27B instruction-tuned model
     lazy=True,
     startup_timeout=600,  # 10 minutes for large model download/loading
-    # Additional vLLM parameters for 27B model
+    # Additional vLLM parameters for 27B model with 2 GPUs
     engine_kwargs={
-        "tensor_parallel_size": 1,  # Adjust based on GPU configuration
+        "tensor_parallel_size": 1,  # Use 2 GPUs for tensor parallelism
         "max_model_len": 4096,      # Reasonable context length
         "gpu_memory_utilization": 0.9,
-        "dtype": "float16"          # Use float16 for memory efficiency
+        "dtype": "bfloat16"          # Use float16 for memory efficiency
     }
 )
 

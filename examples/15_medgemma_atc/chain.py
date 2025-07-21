@@ -19,14 +19,11 @@ class SyntheticTextbook(BaseModel):
     
     titre: str = Field(description="Titre éducatif français pour le médicament/classe")
     contenu: str = Field(
-        description="Explication complète de style manuel universitaire (plusieurs paragraphes) "
-        "couvrant mécanisme d'action, pharmacocinétique, indications, effets secondaires et interactions"
+        description="Explication de style manuel universitaire (1-2 paragraphes) "
+        "couvrant mécanisme d'action et indications principales"
     )
     points_cles: List[str] = Field(
-        description="3-5 points d'apprentissage clés résumant le médicament/classe"
-    )
-    contexte_clinique: str = Field(
-        description="Scénarios cliniques réels et applications thérapeutiques"
+        description="3 points d'apprentissage clés résumant le médicament/classe"
     )
 
 
@@ -104,7 +101,6 @@ Soyez critique mais constructif. Proposez des améliorations spécifiques basée
 Titre : {{synthetic_textbook.titre}}
 Contenu : {{synthetic_textbook.contenu}}
 Points clés : {% for point in synthetic_textbook.points_cles %}• {{point}}{% endfor %}
-Contexte clinique : {{synthetic_textbook.contexte_clinique}}
 
 Identifiez toute erreur factuelle et proposez des améliorations."""
 )
@@ -131,21 +127,21 @@ Erreurs identifiées : {% for erreur in critic.erreurs_factuelles %}• {{erreur
 Suggestions : {% for suggestion in critic.suggestions_amelioration %}• {{suggestion}}{% endfor %}
 Évaluation : {{critic.evaluation_qualite}}
 
-Produisez un texte pharmaceutique académique complet et corrigé, prêt pour le pré-entraînement. Incluez titre, contenu détaillé, points clés et contexte clinique dans un seul texte fluide et cohérent."""
+Produisez un texte pharmaceutique académique complet et corrigé, prêt pour le pré-entraînement. Incluez titre, contenu détaillé et points clés dans un seul texte fluide et cohérent."""
 )
 
 
 # Register MedGemma-27B engine for pharmaceutical text generation
 register_engine(
     name="medgemma",
-    model="google/medgemma-27b-text-it",
+    model="google/medgemma-4b-it",
     lazy=True,
     startup_timeout=600,
     engine_kwargs={
-        "tensor_parallel_size": 1,
+        "tensor_parallel_size": 1,  # Use 2 GPUs for tensor parallelism
         "max_model_len": 4096,
         "gpu_memory_utilization": 0.9,
-        "dtype": "float16"
+        "dtype": "bfloat16"
     }
 )
 
