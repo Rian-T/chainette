@@ -2,6 +2,47 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Debugging Log - MedGemma CIM-10 Issue
+
+### Current Status (2025-07-24)
+**Problem**: Example 14 (medgemma_cim10) fails with "vLLM server process for 'medgemma' exited prematurely"
+
+**Environment Verified**:
+- ✓ 2x NVIDIA A100-SXM4-80GB GPUs available (79.3GB each, ~99% free)
+- ✓ PyTorch 2.6.0+cu124 with CUDA 12.4 working correctly
+- ✓ vLLM 0.8.5.post1 imported successfully
+- ✓ Transformers 4.52.4 working, model config accessible
+- ✓ Memory requirements: ~32.7GB per GPU (well within 80GB capacity)
+
+**Root Cause Found**:
+1. ✓ vLLM startup works correctly - model loads successfully (25.5GB per GPU)
+2. ✗ Configuration errors in chain.py:
+   - `startup_timeout=60000` was in seconds (16.7 hours) instead of intended 10 minutes
+   - `engine_kwargs` field doesn't exist - should use individual parameters
+   - torch.compile phase takes ~3+ minutes, longer than original timeout
+
+**Fix Applied**:
+- Changed `startup_timeout=60000` to `startup_timeout=900` (15 minutes)
+- Replaced `engine_kwargs={}` with individual parameters:
+  - `tensor_parallel_size=2`
+  - `max_model_len=8192`
+  - `gpu_memory_utilization=0.9`
+  - `dtype="bfloat16"`
+
+**Testing Results**:
+✓ Debug inputs (5 records): Chain executed successfully, produced outputs
+✓ Full dataset (19,161 records): Chain started correctly, processing in progress
+- No more "vLLM server process exited prematurely" errors
+- Engine startup takes ~5-10 minutes (model loading + torch.compile)
+- Processing time for full dataset: ~6+ hours estimated
+
+**Final Status**: ✓ FIXED - Issue resolved successfully
+
+**Command Failing**:
+```bash
+poetry run chainette run examples/14_medgemma_cim10/chain.py medgemma_cim10_chain examples/14_medgemma_cim10/inputs_full.jsonl $SCRATCH/chainette/_out_full_icd10
+```
+
 ## Project Overview
 
 Chainette is a type-safe LLM pipeline composition library in Python. It provides a DAG-based execution engine for chaining LLM operations with Pydantic models for input/output validation and guided JSON decoding.

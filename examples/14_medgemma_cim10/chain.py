@@ -28,6 +28,9 @@ class SyntheticTextbook(BaseModel):
     points_cles: List[str] = Field(
         description="3 points d'apprentissage clés résumant la condition"
     )
+    example_clinique: str = Field(description="Un cas clinique synthétique"
+            "typique et réaliste tel que dans les hôpitaux français representant correctement ce code"
+    )
 
 
 class CritiqueFactuelle(BaseModel):
@@ -58,7 +61,7 @@ synthetic_textbook_step = Step(
     engine_name="medgemma",
     input_model=CIM10Input,
     output_model=SyntheticTextbook,
-    sampling=SamplingParams(temperature=0.7, max_tokens=2048),
+    sampling=SamplingParams(temperature=0.3, max_tokens=8048),
     system_prompt="""Vous êtes un expert en éducation médicale créant du contenu de manuel universitaire de haute qualité académique.
 
 Créez du contenu éducatif de qualité manuel universitaire sur les conditions médicales à partir des codes CIM-10. Votre réponse doit être :
@@ -92,7 +95,7 @@ critic_step = Step(
     engine_name="medgemma",
     input_model=SyntheticTextbook,
     output_model=CritiqueFactuelle,
-    sampling=SamplingParams(temperature=0.3, max_tokens=1024),
+    sampling=SamplingParams(temperature=0.0, max_tokens=4024),
     system_prompt="""Vous êtes un médecin expert spécialisé dans la vérification factuelle de contenu médical académique.
 
 Analysez rigoureusement le contenu médical fourni pour identifier :
@@ -108,6 +111,7 @@ Soyez critique mais constructif. Proposez des améliorations spécifiques basée
 
 Titre : {{synthetic_textbook.titre}}
 Contenu : {{synthetic_textbook.contenu}}
+Cas: {{synthetic_textbook.example_clinique}}
 Points clés : {% for point in synthetic_textbook.points_cles %}• {{point}}{% endfor %}
 
 Identifiez toute erreur factuelle et proposez des améliorations."""
@@ -119,7 +123,7 @@ synthesis_step = Step(
     engine_name="medgemma",
     input_model=CritiqueFactuelle,
     output_model=TextbookFinal,
-    sampling=SamplingParams(temperature=0.5, max_tokens=2048),
+    sampling=SamplingParams(temperature=0.1, max_tokens=8048),
     system_prompt="""Vous êtes un expert en éducation médicale chargé de produire le contenu final en tenant compte des corrections factuelles.
 
 Créez un contenu médical final de haute qualité académique en :
@@ -135,6 +139,12 @@ Erreurs identifiées : {% for erreur in critic.erreurs_factuelles %}• {{erreur
 Suggestions : {% for suggestion in critic.suggestions_amelioration %}• {{suggestion}}{% endfor %}
 Évaluation : {{critic.evaluation_qualite}}
 
+Voici le contenu sur lequel se baser en exploitant la correction:
+Titre : {{synthetic_textbook.titre}}
+Contenu : {{synthetic_textbook.contenu}}
+Cas: {{synthetic_textbook.example_clinique}}
+Points clés : {% for point in synthetic_textbook.points_cles %}• {{point}}{% endfor %}
+
 Produisez un texte médical académique complet et corrigé, prêt pour le pré-entraînement. Incluez titre, contenu détaillé et points clés dans un seul texte fluide et cohérent."""
 )
 
@@ -142,16 +152,14 @@ Produisez un texte médical académique complet et corrigé, prêt pour le pré-
 # Register MedGemma-27B engine for medical text generation
 register_engine(
     name="medgemma",
-    model="google/medgemma-4b-it",  # Using the correct 27B instruction-tuned model
+    model="google/medgemma-27b-text-it",  # Using the correct 27B instruction-tuned model
     lazy=True,
-    startup_timeout=600,  # 10 minutes for large model download/loading
-    # Additional vLLM parameters for 27B model with 2 GPUs
-    engine_kwargs={
-        "tensor_parallel_size": 1,  # Use 2 GPUs for tensor parallelism
-        "max_model_len": 4096,      # Reasonable context length
-        "gpu_memory_utilization": 0.9,
-        "dtype": "bfloat16"          # Use float16 for memory efficiency
-    }
+    startup_timeout=900,  # 15 minutes for large model download/loading/compilation
+    # vLLM parameters for 27B model with 2 GPUs
+    tensor_parallel_size=2,  # Use 2 GPUs for tensor parallelism
+    max_model_len=8192,      # Reasonable context length
+    gpu_memory_utilization=0.9,
+    dtype="bfloat16"          # Use bfloat16 for memory efficiency
 )
 
 
