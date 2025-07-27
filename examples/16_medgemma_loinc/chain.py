@@ -145,15 +145,14 @@ Produisez un texte de biologie médicale académique complet et corrigé, prêt 
 # Register MedGemma-27B engine for medical biology text generation
 register_engine(
     name="medgemma",
-    model="google/medgemma-4b-it",
+    model="google/medgemma-27b-text-it",  # Using the correct 27B instruction-tuned model
     lazy=True,
-    startup_timeout=600,
-    engine_kwargs={
-        "tensor_parallel_size": 1,  # Use 2 GPUs for tensor parallelism
-        "max_model_len": 4096,
-        "gpu_memory_utilization": 0.9,
-        "dtype": "bfloat16"
-    }
+    startup_timeout=900,  # 15 minutes for large model download/loading/compilation
+    # vLLM parameters for 27B model with 2 GPUs
+    tensor_parallel_size=2,  # Use 2 GPUs for tensor parallelism
+    max_model_len=8192,      # Reasonable context length
+    gpu_memory_utilization=0.9,
+    dtype="bfloat16"          # Use bfloat16 for memory efficiency
 )
 
 
